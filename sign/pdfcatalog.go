@@ -141,11 +141,8 @@ func (context *SignContext) createCatalog() ([]byte, error) {
 	// shall include this key, with a value of true, if it has not
 	// provided appearance streams for all visible widget
 	// annotations present in the document.
-	// if context.SignData.Visible {
-	//  catalog_buffer.WriteString(" /NeedAppearances true")
-	// } else {
-	//  catalog_buffer.WriteString(" /NeedAppearances false")
-	// }
+	// Force appearance regeneration for text fields (especially initials fields)
+	catalog_buffer.WriteString("    /NeedAppearances true\n")
 
 	// Signature flags (Table 225)
 	//

@@ -10,6 +10,34 @@ import (
 	"unicode/utf16"
 )
 
+// normalizeDA attempts to convert a possibly multi-line DA string like:
+//
+//	"0 0 0 rg\n/Helvetica 10 Tf"
+//
+// into a single-line, font-first form:
+//
+//	"/Helvetica 10 Tf 0 0 0 rg"
+//
+// normalizeDA ensures DA is a single-line string and forces black color.
+// It preserves an existing font size if present, otherwise defaults to 10.
+func normalizeDA(raw string) string {
+	// collapse newlines and extra spaces
+	s := strings.ReplaceAll(raw, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	parts := strings.Fields(s)
+	// default size
+	size := "10"
+	if len(parts) > 0 {
+		// try to find a size token before Tf, e.g. '/Helvetica 10 Tf' or '10 Tf'
+		re := regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)\s*Tf`)
+		if m := re.FindStringSubmatch(s); len(m) >= 2 {
+			size = m[1]
+		}
+	}
+	// Use resource font /F1 (must be present in Resources) and force black color
+	return fmt.Sprintf("/F1 %s Tf 0 0 0 rg", size)
+}
+
 // fillInitialsFields will search the AcroForm Fields array for fields with names
 // matching the pattern `initials_page_${pageIndex}_signer_${signer_uid}` and,
 // when the signer_uid matches the configured Appearance.SignerUID, replace the
@@ -131,6 +159,10 @@ func (context *SignContext) fillInitialsFields() error {
 				if key == "V" {
 					continue
 				}
+				// skip appearance streams to force viewers to regenerate them
+				if key == "AP" {
+					continue
+				}
 				buf.WriteString(" /")
 				buf.WriteString(key)
 				buf.WriteString(" ")
@@ -159,6 +191,10 @@ func (context *SignContext) fillInitialsFields() error {
 						}
 					}
 					buf.WriteString(pdfString(asciiT))
+				} else if key == "DA" {
+					// normalize appearance default string
+					daVal := field.Key("DA").RawString()
+					buf.WriteString(pdfString(normalizeDA(daVal)))
 				} else {
 					context.serializeCatalogEntry(&buf, ptr.GetID(), field.Key(key))
 				}
@@ -167,6 +203,10 @@ func (context *SignContext) fillInitialsFields() error {
 
 			// Set new value
 			buf.WriteString(" /V ")
+			buf.WriteString(pdfString(initials))
+			buf.WriteString("\n")
+			// Set appearance state to match value for proper rendering
+			buf.WriteString(" /AS ")
 			buf.WriteString(pdfString(initials))
 			buf.WriteString("\n")
 			buf.WriteString(">>\n")
@@ -194,6 +234,9 @@ func (context *SignContext) fillInitialsFields() error {
 					if kkey == "V" {
 						continue
 					}
+					if kkey == "AP" {
+						continue
+					}
 					kbuf.WriteString(" /")
 					kbuf.WriteString(kkey)
 					kbuf.WriteString(" ")
@@ -219,12 +262,19 @@ func (context *SignContext) fillInitialsFields() error {
 							}
 						}
 						kbuf.WriteString(pdfString(asciiT))
+					} else if kkey == "DA" {
+						daVal := kid.Key("DA").RawString()
+						kbuf.WriteString(pdfString(normalizeDA(daVal)))
 					} else {
 						context.serializeCatalogEntry(&kbuf, kptr.GetID(), kid.Key(kkey))
 					}
 					kbuf.WriteString("\n")
 				}
 				kbuf.WriteString(" /V ")
+				kbuf.WriteString(pdfString(initials))
+				kbuf.WriteString("\n")
+				// Set appearance state to match value for proper rendering
+				kbuf.WriteString(" /AS ")
 				kbuf.WriteString(pdfString(initials))
 				kbuf.WriteString("\n")
 				kbuf.WriteString(">>\n")
