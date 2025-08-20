@@ -142,7 +142,7 @@ func (context *SignContext) createCatalog() ([]byte, error) {
 	// provided appearance streams for all visible widget
 	// annotations present in the document.
 	// Force appearance regeneration for text fields (especially initials fields)
-	catalog_buffer.WriteString("    /NeedAppearances true\n")
+	// catalog_buffer.WriteString("    /NeedAppearances true\n")
 
 	// Signature flags (Table 225)
 	//

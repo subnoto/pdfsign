@@ -5,9 +5,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf16"
+
+	"github.com/digitorus/pdf"
 )
 
 // normalizeDA attempts to convert a possibly multi-line DA string like:
@@ -36,6 +39,75 @@ func normalizeDA(raw string) string {
 	}
 	// Use resource font /F1 (must be present in Resources) and force black color
 	return fmt.Sprintf("/F1 %s Tf 0 0 0 rg", size)
+}
+
+// createTextFieldAppearance creates an appearance stream for a text field
+func (context *SignContext) createTextFieldAppearance(text string, rect [4]float64, da string) ([]byte, error) {
+	width := rect[2] - rect[0]
+	height := rect[3] - rect[1]
+	
+	if width <= 0 || height <= 0 {
+		return nil, fmt.Errorf("invalid rectangle dimensions")
+	}
+
+	// Extract font size from DA string
+	fontSize := 10.0
+	re := regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)\s*Tf`)
+	if m := re.FindStringSubmatch(da); len(m) >= 2 {
+		if size, err := strconv.ParseFloat(m[1], 64); err == nil {
+			fontSize = size
+		}
+	}
+
+	// Adjust font size to fit the field height
+	if fontSize > height*0.8 {
+		fontSize = height * 0.8
+	}
+
+	// Center text vertically and horizontally
+	textWidth := float64(len(text)) * fontSize * 0.5 // rough approximation
+	textX := (width - textWidth) / 2
+	if textX < 2 {
+		textX = 2 // small left margin
+	}
+	textY := (height - fontSize) / 2
+
+	// Create appearance stream
+	var stream bytes.Buffer
+	stream.WriteString("q\n")                                    // Save graphics state
+	stream.WriteString("BT\n")                                   // Begin text
+	stream.WriteString("/F1 ")                                   // Use font F1 (must be in Resources)
+	stream.WriteString(fmt.Sprintf("%.1f", fontSize))            // Font size
+	stream.WriteString(" Tf\n")                                  // Set font
+	stream.WriteString("0 0 0 rg\n")                            // Black color
+	stream.WriteString(fmt.Sprintf("%.1f %.1f Td\n", textX, textY)) // Position
+	stream.WriteString(pdfString(text))                          // Text content
+	stream.WriteString(" Tj\n")                                  // Show text
+	stream.WriteString("ET\n")                                   // End text
+	stream.WriteString("Q\n")                                    // Restore graphics state
+
+	// Create XObject dictionary
+	var xobj bytes.Buffer
+	xobj.WriteString("<<\n")
+	xobj.WriteString("  /Type /XObject\n")
+	xobj.WriteString("  /Subtype /Form\n")
+	xobj.WriteString(fmt.Sprintf("  /BBox [0 0 %.1f %.1f]\n", width, height))
+	xobj.WriteString("  /Resources <<\n")
+	xobj.WriteString("    /Font <<\n")
+	xobj.WriteString("      /F1 <<\n")
+	xobj.WriteString("        /Type /Font\n")
+	xobj.WriteString("        /Subtype /Type1\n")
+	xobj.WriteString("        /BaseFont /Helvetica\n")
+	xobj.WriteString("      >>\n")
+	xobj.WriteString("    >>\n")
+	xobj.WriteString("  >>\n")
+	xobj.WriteString(fmt.Sprintf("  /Length %d\n", stream.Len()))
+	xobj.WriteString(">>\n")
+	xobj.WriteString("stream\n")
+	xobj.Write(stream.Bytes())
+	xobj.WriteString("\nendstream\n")
+
+	return xobj.Bytes(), nil
 }
 
 // fillInitialsFields will search the AcroForm Fields array for fields with names
@@ -161,6 +233,27 @@ func (context *SignContext) fillInitialsFields() error {
 				}
 				// skip appearance streams to force viewers to regenerate them
 				if key == "AP" {
+					// Generate new appearance stream for this field
+					// Try to get rect from first Kid widget
+					rect := [4]float64{0, 0, 100, 20} // default size
+					kids := field.Key("Kids")
+					if !kids.IsNull() && kids.Len() > 0 {
+						firstKid := kids.Index(0)
+						if rectVal := firstKid.Key("Rect"); !rectVal.IsNull() && rectVal.Kind() == pdf.Array && rectVal.Len() >= 4 {
+							rect[0] = rectVal.Index(0).Float64()
+							rect[1] = rectVal.Index(1).Float64()
+							rect[2] = rectVal.Index(2).Float64()
+							rect[3] = rectVal.Index(3).Float64()
+						}
+					}
+					da := normalizeDA(field.Key("DA").RawString())
+					appearance, err := context.createTextFieldAppearance(initials, rect, da)
+					if err == nil {
+						apObjectId, err := context.addObject(appearance)
+						if err == nil {
+							buf.WriteString(fmt.Sprintf("/AP << /N %d 0 R >>\n", apObjectId))
+						}
+					}
 					continue
 				}
 				buf.WriteString(" /")
@@ -235,6 +328,24 @@ func (context *SignContext) fillInitialsFields() error {
 						continue
 					}
 					if kkey == "AP" {
+						// Generate new appearance stream for this widget
+						var rect [4]float64
+						if rectVal := kid.Key("Rect"); !rectVal.IsNull() && rectVal.Kind() == pdf.Array && rectVal.Len() >= 4 {
+							rect[0] = rectVal.Index(0).Float64()
+							rect[1] = rectVal.Index(1).Float64()
+							rect[2] = rectVal.Index(2).Float64()
+							rect[3] = rectVal.Index(3).Float64()
+						} else {
+							rect = [4]float64{0, 0, 100, 20} // default size
+						}
+						da := normalizeDA(kid.Key("DA").RawString())
+						appearance, err := context.createTextFieldAppearance(initials, rect, da)
+						if err == nil {
+							apObjectId, err := context.addObject(appearance)
+							if err == nil {
+								kbuf.WriteString(fmt.Sprintf(" /AP << /N %d 0 R >>\n", apObjectId))
+							}
+						}
 						continue
 					}
 					kbuf.WriteString(" /")
