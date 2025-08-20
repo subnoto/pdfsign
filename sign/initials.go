@@ -134,7 +134,34 @@ func (context *SignContext) fillInitialsFields() error {
 				buf.WriteString(" /")
 				buf.WriteString(key)
 				buf.WriteString(" ")
-				context.serializeCatalogEntry(&buf, ptr.GetID(), field.Key(key))
+
+				// If this is the field name (/T) and it's encoded as UTF-16 with a BOM,
+				// decode it and write as a normal PDF string so Acrobat can use it.
+				if key == "T" {
+					tVal := field.Key("T").RawString()
+					b := []byte(tVal)
+					asciiT := tVal
+					if len(b) >= 2 {
+						if b[0] == 0xfe && b[1] == 0xff {
+							// UTF-16 BE
+							var u16s []uint16
+							for i := 2; i+1 < len(b); i += 2 {
+								u16s = append(u16s, uint16(b[i])<<8|uint16(b[i+1]))
+							}
+							asciiT = string(utf16.Decode(u16s))
+						} else if b[0] == 0xff && b[1] == 0xfe {
+							// UTF-16 LE
+							var u16s []uint16
+							for i := 2; i+1 < len(b); i += 2 {
+								u16s = append(u16s, uint16(b[i])|uint16(b[i+1])<<8)
+							}
+							asciiT = string(utf16.Decode(u16s))
+						}
+					}
+					buf.WriteString(pdfString(asciiT))
+				} else {
+					context.serializeCatalogEntry(&buf, ptr.GetID(), field.Key(key))
+				}
 				buf.WriteString("\n")
 			}
 
@@ -170,7 +197,31 @@ func (context *SignContext) fillInitialsFields() error {
 					kbuf.WriteString(" /")
 					kbuf.WriteString(kkey)
 					kbuf.WriteString(" ")
-					context.serializeCatalogEntry(&kbuf, kptr.GetID(), kid.Key(kkey))
+
+					// Handle widget /T similarly: decode UTF-16 BOM if present
+					if kkey == "T" {
+						tVal := kid.Key("T").RawString()
+						b := []byte(tVal)
+						asciiT := tVal
+						if len(b) >= 2 {
+							if b[0] == 0xfe && b[1] == 0xff {
+								var u16s []uint16
+								for i := 2; i+1 < len(b); i += 2 {
+									u16s = append(u16s, uint16(b[i])<<8|uint16(b[i+1]))
+								}
+								asciiT = string(utf16.Decode(u16s))
+							} else if b[0] == 0xff && b[1] == 0xfe {
+								var u16s []uint16
+								for i := 2; i+1 < len(b); i += 2 {
+									u16s = append(u16s, uint16(b[i])|uint16(b[i+1])<<8)
+								}
+								asciiT = string(utf16.Decode(u16s))
+							}
+						}
+						kbuf.WriteString(pdfString(asciiT))
+					} else {
+						context.serializeCatalogEntry(&kbuf, kptr.GetID(), kid.Key(kkey))
+					}
 					kbuf.WriteString("\n")
 				}
 				kbuf.WriteString(" /V ")
