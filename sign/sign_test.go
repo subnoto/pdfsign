@@ -252,112 +252,116 @@ func TestSignPDFInitials(t *testing.T) {
 		{"newt", "6e657740746f746f2e636f6d", "Newt Totoo", "NT"},
 	}
 
+	inputFilePath := "../testfiles/testfile50.pdf"
+	var lastSignedFile string = inputFilePath
 	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(st *testing.T) {
-			st.Parallel()
+		tmpfile, err := os.CreateTemp("", "sign_initials_")
+		if err != nil {
+			t.Fatalf("failed to create tmpfile: %v", err)
+		}
 
-			inputFilePath := "../testfiles/testfile50.pdf"
-			tmpfile, err := os.CreateTemp("", "sign_initials_")
-			if err != nil {
-				st.Fatalf("failed to create tmpfile: %v", err)
-			}
-			defer func() {
-				_ = os.Remove(tmpfile.Name())
-			}()
-
-			_, err = SignFile(inputFilePath, tmpfile.Name(), SignData{
-				Signature: SignDataSignature{
-					Info: SignDataSignatureInfo{
-						Name: tc.signerName,
-						Date: time.Now().Local(),
-					},
-					CertType:   CertificationSignature,
-					DocMDPPerm: AllowFillingExistingFormFieldsAndSignaturesPerms,
+		_, err = SignFile(lastSignedFile, tmpfile.Name(), SignData{
+			Signature: SignDataSignature{
+				Info: SignDataSignatureInfo{
+					Name: tc.signerName,
+					Date: time.Now().Local(),
 				},
-				Signer:      pkey,
-				Certificate: cert,
-				Appearance: Appearance{
-					SignerUID: tc.uid,
-				},
-			})
-			if err != nil {
-				st.Fatalf("sign failed: %v", err)
-			}
-
-			// Open signed file and verify AcroForm fields for the uid were updated
-			sf, err := os.Open(tmpfile.Name())
-			if err != nil {
-				st.Fatalf("failed to open signed file: %v", err)
-			}
-			defer sf.Close()
-			sfi, err := sf.Stat()
-			if err != nil {
-				st.Fatalf("stat failed: %v", err)
-			}
-			rdr, err := pdf.NewReader(sf, sfi.Size())
-			if err != nil {
-				st.Fatalf("pdf reader failed: %v", err)
-			}
-
-			acro := rdr.Trailer().Key("Root").Key("AcroForm")
-			if acro.IsNull() {
-				st.Fatalf("signed PDF missing AcroForm")
-			}
-			fields := acro.Key("Fields")
-			if fields.IsNull() {
-				st.Fatalf("signed PDF AcroForm missing Fields")
-			}
-
-			found := false
-			for i := 0; i < fields.Len(); i++ {
-				field := fields.Index(i)
-				tVal := field.Key("T")
-				if tVal.IsNull() {
-					continue
-				}
-				fieldName := tVal.RawString()
-
-				// Decode UTF-16 field names just like fillInitialsFields does
-				decodedFieldName := fieldName
-				b := []byte(fieldName)
-				if len(b) >= 2 {
-					// BOM 0xFEFF = big endian, 0xFFFE = little endian
-					if b[0] == 0xfe && b[1] == 0xff {
-						// UTF-16 BE
-						var u16s []uint16
-						for i := 2; i+1 < len(b); i += 2 {
-							u16s = append(u16s, uint16(b[i])<<8|uint16(b[i+1]))
-						}
-						decodedFieldName = string(utf16.Decode(u16s))
-					} else if b[0] == 0xff && b[1] == 0xfe {
-						// UTF-16 LE
-						var u16s []uint16
-						for i := 2; i+1 < len(b); i += 2 {
-							u16s = append(u16s, uint16(b[i])|uint16(b[i+1])<<8)
-						}
-						decodedFieldName = string(utf16.Decode(u16s))
-					}
-				}
-
-				if !strings.Contains(decodedFieldName, tc.uid) {
-					continue
-				}
-				vVal := field.Key("V")
-				if vVal.IsNull() {
-					continue
-				}
-				raw := vVal.RawString()
-				if strings.Contains(raw, tc.expectedInitials) {
-					found = true
-					break
-				}
-			}
-
-			if !found {
-				st.Fatalf("expected initials %s for uid %s not found in any AcroForm field", tc.expectedInitials, tc.uid)
-			}
+				CertType:   CertificationSignature,
+				DocMDPPerm: AllowFillingExistingFormFieldsAndSignaturesPerms,
+			},
+			Signer:      pkey,
+			Certificate: cert,
+			Appearance: Appearance{
+				SignerUID: tc.uid,
+			},
 		})
+		if err != nil {
+			t.Fatalf("sign failed: %v", err)
+		}
+
+		// Open signed file and verify AcroForm fields for the uid were updated
+		sf, err := os.Open(tmpfile.Name())
+		if err != nil {
+			_ = os.Remove(tmpfile.Name())
+			t.Fatalf("failed to open signed file: %v", err)
+		}
+		sfi, err := sf.Stat()
+		if err != nil {
+			sf.Close()
+			_ = os.Remove(tmpfile.Name())
+			t.Fatalf("stat failed: %v", err)
+		}
+		rdr, err := pdf.NewReader(sf, sfi.Size())
+		if err != nil {
+			sf.Close()
+			_ = os.Remove(tmpfile.Name())
+			t.Fatalf("pdf reader failed: %v", err)
+		}
+
+		acro := rdr.Trailer().Key("Root").Key("AcroForm")
+		if acro.IsNull() {
+			sf.Close()
+			_ = os.Remove(tmpfile.Name())
+			t.Fatalf("signed PDF missing AcroForm")
+		}
+		fields := acro.Key("Fields")
+		if fields.IsNull() {
+			sf.Close()
+			_ = os.Remove(tmpfile.Name())
+			t.Fatalf("signed PDF AcroForm missing Fields")
+		}
+
+		found := false
+		for i := 0; i < fields.Len(); i++ {
+			field := fields.Index(i)
+			tVal := field.Key("T")
+			if tVal.IsNull() {
+				continue
+			}
+			fieldName := tVal.RawString()
+
+			// Decode UTF-16 field names just like fillInitialsFields does
+			decodedFieldName := fieldName
+			b := []byte(fieldName)
+			if len(b) >= 2 {
+				// BOM 0xFEFF = big endian, 0xFFFE = little endian
+				if b[0] == 0xfe && b[1] == 0xff {
+					// UTF-16 BE
+					var u16s []uint16
+					for i := 2; i+1 < len(b); i += 2 {
+						u16s = append(u16s, uint16(b[i])<<8|uint16(b[i+1]))
+					}
+					decodedFieldName = string(utf16.Decode(u16s))
+				} else if b[0] == 0xff && b[1] == 0xfe {
+					// UTF-16 LE
+					var u16s []uint16
+					for i := 2; i+1 < len(b); i += 2 {
+						u16s = append(u16s, uint16(b[i])|uint16(b[i+1])<<8)
+					}
+					decodedFieldName = string(utf16.Decode(u16s))
+				}
+			}
+
+			if !strings.Contains(decodedFieldName, tc.uid) {
+				continue
+			}
+			vVal := field.Key("V")
+			if vVal.IsNull() {
+				continue
+			}
+			raw := vVal.RawString()
+			if strings.Contains(raw, tc.expectedInitials) {
+				found = true
+				break
+			}
+		}
+
+		sf.Close()
+
+		if !found {
+			_ = os.Remove(tmpfile.Name())
+			t.Fatalf("expected initials %s for uid %s not found in any AcroForm field", tc.expectedInitials, tc.uid)
+		}
 	}
 }
 
