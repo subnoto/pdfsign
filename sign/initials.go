@@ -45,7 +45,7 @@ func normalizeDA(raw string) string {
 func (context *SignContext) createTextFieldAppearance(text string, rect [4]float64, da string) ([]byte, error) {
 	width := rect[2] - rect[0]
 	height := rect[3] - rect[1]
-	
+
 	if width <= 0 || height <= 0 {
 		return nil, fmt.Errorf("invalid rectangle dimensions")
 	}
@@ -59,32 +59,45 @@ func (context *SignContext) createTextFieldAppearance(text string, rect [4]float
 		}
 	}
 
-	// Adjust font size to fit the field height
-	if fontSize > height*0.8 {
-		fontSize = height * 0.8
+	// Adjust font size to fit the field height with some padding
+	maxFontSize := height * 0.7
+	if fontSize > maxFontSize {
+		fontSize = maxFontSize
 	}
 
-	// Center text vertically and horizontally
-	textWidth := float64(len(text)) * fontSize * 0.5 // rough approximation
+	// Better text width calculation (rough approximation for Helvetica)
+	textWidth := float64(len(text)) * fontSize * 0.6
+	
+	// Center text horizontally and vertically
 	textX := (width - textWidth) / 2
-	if textX < 2 {
-		textX = 2 // small left margin
+	if textX < 1 {
+		textX = 1 // small left margin
 	}
-	textY := (height - fontSize) / 2
+	
+	// Center vertically: baseline should be positioned so text appears centered
+	// For Helvetica, descender is about 0.2 * fontSize, ascender is about 0.7 * fontSize
+	textY := (height - fontSize) / 2 + fontSize * 0.2
 
 	// Create appearance stream
 	var stream bytes.Buffer
-	stream.WriteString("q\n")                                    // Save graphics state
-	stream.WriteString("BT\n")                                   // Begin text
-	stream.WriteString("/F1 ")                                   // Use font F1 (must be in Resources)
-	stream.WriteString(fmt.Sprintf("%.1f", fontSize))            // Font size
-	stream.WriteString(" Tf\n")                                  // Set font
-	stream.WriteString("0 0 0 rg\n")                            // Black color
+	stream.WriteString("q\n")                                       // Save graphics state
+	
+	// Draw white background
+	stream.WriteString("1 1 1 rg\n")                                // White fill color
+	stream.WriteString(fmt.Sprintf("0 0 %.1f %.1f re\n", width, height)) // Rectangle covering entire field
+	stream.WriteString("f\n")                                       // Fill rectangle
+	
+	// Draw text
+	stream.WriteString("BT\n")                                      // Begin text
+	stream.WriteString("/F1 ")                                      // Use font F1 (must be in Resources)
+	stream.WriteString(fmt.Sprintf("%.1f", fontSize))               // Font size
+	stream.WriteString(" Tf\n")                                     // Set font
+	stream.WriteString("0 0 0 rg\n")                                // Black text color
 	stream.WriteString(fmt.Sprintf("%.1f %.1f Td\n", textX, textY)) // Position
-	stream.WriteString(pdfString(text))                          // Text content
-	stream.WriteString(" Tj\n")                                  // Show text
-	stream.WriteString("ET\n")                                   // End text
-	stream.WriteString("Q\n")                                    // Restore graphics state
+	stream.WriteString(pdfString(text))                             // Text content
+	stream.WriteString(" Tj\n")                                     // Show text
+	stream.WriteString("ET\n")                                      // End text
+	stream.WriteString("Q\n")                                       // Restore graphics state
 
 	// Create XObject dictionary
 	var xobj bytes.Buffer
