@@ -362,15 +362,6 @@ func TestSignPDFInitials(t *testing.T) {
 			_ = os.Remove(tmpfile.Name())
 			t.Fatalf("expected initials %s for uid %s not found in any AcroForm field", tc.expectedInitials, tc.uid)
 		}
-
-		if err := os.Rename(tmpfile.Name(), "../testfiles/failed/toto.pdf"); err != nil {
-			_ = os.Remove(tmpfile.Name())
-			t.Error(err)
-		} else {
-			_ = os.Remove(tmpfile.Name())
-		}
-
-		lastSignedFile = "../testfiles/failed/toto.pdf"
 	}
 }
 
