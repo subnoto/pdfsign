@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestFile(t *testing.T) {
@@ -387,4 +388,104 @@ func TestExternalRevocationChecking(t *testing.T) {
 
 	// This test mainly verifies that the options are properly passed through
 	// and the external checking logic doesn't break the verification process
+}
+
+func TestVerifyFileWithExternalRevocationTestFile51(t *testing.T) {
+	testFilePath := filepath.Join("..", "testfiles", "testfile51.pdf")
+
+	// Check if test file exists
+	if _, err := os.Stat(testFilePath); os.IsNotExist(err) {
+		t.Skipf("Test file %s does not exist", testFilePath)
+	}
+
+	// Open the test file
+	file, err := os.Open(testFilePath)
+	if err != nil {
+		t.Fatalf("Failed to open test file: %v", err)
+	}
+	defer func() {
+		if err := file.Close(); err != nil {
+			t.Logf("Warning: failed to close file: %v", err)
+		}
+	}()
+
+	// First, verify without external checking to see what certificates we have
+	options := DefaultVerifyOptions()
+	options.EnableExternalRevocationCheck = false
+	response, err := VerifyFileWithOptions(file, options)
+	if err != nil {
+		t.Fatalf("Failed to verify file: %v", err)
+	}
+
+	if len(response.Signatures) == 0 {
+		t.Fatal("No signatures found in testfile51.pdf")
+	}
+
+	// Check if certificates have revocation URLs
+	hasRevocationURLs := false
+	for _, sig := range response.Signatures {
+		for _, cert := range sig.Validation.Certificates {
+			if cert.Certificate != nil {
+				if len(cert.Certificate.OCSPServer) > 0 || len(cert.Certificate.CRLDistributionPoints) > 0 {
+					hasRevocationURLs = true
+					t.Logf("Found certificate with revocation URLs: %s", cert.Certificate.Subject.CommonName)
+					if len(cert.Certificate.OCSPServer) > 0 {
+						t.Logf("  OCSP URLs: %v", cert.Certificate.OCSPServer)
+					}
+					if len(cert.Certificate.CRLDistributionPoints) > 0 {
+						t.Logf("  CRL URLs: %v", cert.Certificate.CRLDistributionPoints)
+					}
+				}
+			}
+		}
+	}
+
+	if !hasRevocationURLs {
+		t.Skip("testfile51.pdf does not contain certificates with revocation URLs")
+	}
+
+	// Reset file position
+	if _, err := file.Seek(0, 0); err != nil {
+		t.Fatalf("Failed to reset file position: %v", err)
+	}
+
+	// Now test with external revocation checking enabled
+	// Note: This will attempt to make real network calls, which may fail
+	// but should not crash the verification process
+	options.EnableExternalRevocationCheck = true
+	options.HTTPTimeout = 5 * time.Second
+
+	response, err = VerifyFileWithOptions(file, options)
+	if err != nil {
+		t.Fatalf("Failed to verify file with external revocation: %v", err)
+	}
+
+	// Verify that external checking was attempted
+	externalCheckAttempted := false
+	for _, sig := range response.Signatures {
+		for _, cert := range sig.Validation.Certificates {
+			if cert.OCSPExternal || cert.CRLExternal {
+				externalCheckAttempted = true
+				t.Logf("External revocation check was performed:")
+				if cert.OCSPExternal {
+					t.Logf("  OCSP External: %v", cert.OCSPExternal)
+				}
+				if cert.CRLExternal {
+					t.Logf("  CRL External: %v", cert.CRLExternal)
+				}
+			}
+			// Check revocation warnings
+			if cert.RevocationWarning != "" {
+				t.Logf("  Revocation Warning: %s", cert.RevocationWarning)
+			}
+		}
+	}
+
+	// The test passes if verification completes without crashing
+	// External checks may succeed or fail depending on network connectivity
+	// but the important thing is that the verification process handles both cases
+	t.Logf("Verification completed successfully with external revocation checking enabled")
+	if !externalCheckAttempted {
+		t.Logf("Note: External revocation checks were not successful (likely due to network issues or invalid URLs)")
+	}
 }

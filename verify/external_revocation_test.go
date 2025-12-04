@@ -5,6 +5,8 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -338,6 +340,180 @@ func TestPerformExternalCRLCheck(t *testing.T) {
 				if tt.expectRevoked && revocationTime == nil {
 					t.Error("Expected revocation time when certificate is revoked")
 				}
+			}
+		})
+	}
+}
+
+// TestExternalRevocationWithTestFile51 tests external revocation checking with testfile51.pdf
+func TestExternalRevocationWithTestFile51(t *testing.T) {
+	testFilePath := filepath.Join("..", "testfiles", "testfile51.pdf")
+
+	// Check if test file exists
+	if _, err := os.Stat(testFilePath); os.IsNotExist(err) {
+		t.Skipf("Test file %s does not exist", testFilePath)
+	}
+
+	// Open the test file
+	file, err := os.Open(testFilePath)
+	if err != nil {
+		t.Fatalf("Failed to open test file: %v", err)
+	}
+	defer func() {
+		if err := file.Close(); err != nil {
+			t.Logf("Warning: failed to close file: %v", err)
+		}
+	}()
+
+	// Verify the file to extract certificates
+	options := DefaultVerifyOptions()
+	options.EnableExternalRevocationCheck = false // Don't make real network calls yet
+	response, err := VerifyFileWithOptions(file, options)
+	if err != nil {
+		t.Fatalf("Failed to verify file: %v", err)
+	}
+
+	if len(response.Signatures) == 0 {
+		t.Fatal("No signatures found in testfile51.pdf")
+	}
+
+	// Find certificates with revocation URLs
+	var certsWithOCSP []*x509.Certificate
+	var certsWithCRL []*x509.Certificate
+	issuerCerts := make(map[string]*x509.Certificate)
+
+	for _, sig := range response.Signatures {
+		for _, certInfo := range sig.Validation.Certificates {
+			cert := certInfo.Certificate
+			if cert == nil {
+				continue
+			}
+
+			// Store issuer certs by subject key identifier or serial
+			issuerKey := cert.Issuer.String()
+			issuerCerts[issuerKey] = cert
+
+			// Check for OCSP URLs
+			if len(cert.OCSPServer) > 0 {
+				certsWithOCSP = append(certsWithOCSP, cert)
+				t.Logf("Found certificate with OCSP URL: %s (OCSP: %v)", cert.Subject.CommonName, cert.OCSPServer)
+			}
+
+			// Check for CRL URLs
+			if len(cert.CRLDistributionPoints) > 0 {
+				certsWithCRL = append(certsWithCRL, cert)
+				t.Logf("Found certificate with CRL URL: %s (CRL: %v)", cert.Subject.CommonName, cert.CRLDistributionPoints)
+			}
+		}
+	}
+
+	if len(certsWithOCSP) == 0 && len(certsWithCRL) == 0 {
+		t.Skip("testfile51.pdf does not contain certificates with revocation URLs")
+	}
+
+	// Test OCSP external revocation if we have OCSP URLs
+	if len(certsWithOCSP) > 0 {
+		t.Run("OCSP external revocation", func(t *testing.T) {
+			testCert := certsWithOCSP[0]
+
+			// Find issuer certificate
+			var issuer *x509.Certificate
+			for _, cert := range issuerCerts {
+				if cert.Subject.String() == testCert.Issuer.String() {
+					issuer = cert
+					break
+				}
+			}
+			if issuer == nil {
+				// Try to find issuer from certificate chain
+				for _, sig := range response.Signatures {
+					for _, certInfo := range sig.Validation.Certificates {
+						if certInfo.Certificate != nil && certInfo.Certificate.Subject.String() == testCert.Issuer.String() {
+							issuer = certInfo.Certificate
+							break
+						}
+					}
+					if issuer != nil {
+						break
+					}
+				}
+			}
+
+			// Create a mock OCSP server
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "POST" {
+					w.WriteHeader(http.StatusMethodNotAllowed)
+					return
+				}
+				// Return a mock response that will fail parsing (expected)
+				w.Header().Set("Content-Type", "application/ocsp-response")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("mock-ocsp-response"))
+			}))
+			defer server.Close()
+
+			// Test with external revocation enabled
+			options := &VerifyOptions{
+				EnableExternalRevocationCheck: true,
+				HTTPTimeout:                   5 * time.Second,
+			}
+
+			// Mock the OCSP request function to use our test server
+			ocspRequestFunc := func(cert, issuer *x509.Certificate) ([]byte, error) {
+				return []byte("dummy-ocsp-request"), nil
+			}
+
+			// Temporarily replace the OCSP server URL with our test server
+			originalOCSP := testCert.OCSPServer
+			testCert.OCSPServer = []string{server.URL}
+			defer func() {
+				testCert.OCSPServer = originalOCSP
+			}()
+
+			_, err := performExternalOCSPCheckWithFunc(testCert, issuer, options, ocspRequestFunc)
+
+			// We expect an error because the mock response won't parse correctly
+			if err == nil {
+				t.Error("Expected error parsing mock OCSP response, but got none")
+			} else if !containsString(err.Error(), "failed to parse OCSP response") {
+				t.Errorf("Expected parsing error, got: %v", err)
+			}
+		})
+	}
+
+	// Test CRL external revocation if we have CRL URLs
+	if len(certsWithCRL) > 0 {
+		t.Run("CRL external revocation", func(t *testing.T) {
+			testCert := certsWithCRL[0]
+
+			// Create a mock CRL server
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Return invalid CRL data (expected to fail parsing)
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("invalid-crl-data"))
+			}))
+			defer server.Close()
+
+			// Test with external revocation enabled
+			options := &VerifyOptions{
+				EnableExternalRevocationCheck: true,
+				HTTPTimeout:                   5 * time.Second,
+			}
+
+			// Temporarily replace the CRL URL with our test server
+			originalCRL := testCert.CRLDistributionPoints
+			testCert.CRLDistributionPoints = []string{server.URL}
+			defer func() {
+				testCert.CRLDistributionPoints = originalCRL
+			}()
+
+			_, _, err := performExternalCRLCheck(testCert, options)
+
+			// We expect an error because the mock CRL won't parse correctly
+			if err == nil {
+				t.Error("Expected error parsing mock CRL, but got none")
+			} else if !containsString(err.Error(), "failed to parse CRL") {
+				t.Errorf("Expected parsing error, got: %v", err)
 			}
 		})
 	}

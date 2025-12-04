@@ -67,26 +67,26 @@ func (context *SignContext) createTextFieldAppearance(text string, rect [4]float
 
 	// Better text width calculation (rough approximation for Helvetica)
 	textWidth := float64(len(text)) * fontSize * 0.6
-	
+
 	// Center text horizontally and vertically
 	textX := (width - textWidth) / 2
 	if textX < 1 {
 		textX = 1 // small left margin
 	}
-	
+
 	// Center vertically: baseline should be positioned so text appears centered
 	// For Helvetica, descender is about 0.2 * fontSize, ascender is about 0.7 * fontSize
-	textY := (height - fontSize) / 2 + fontSize * 0.2
+	textY := (height-fontSize)/2 + fontSize*0.2
 
 	// Create appearance stream
 	var stream bytes.Buffer
-	stream.WriteString("q\n")                                       // Save graphics state
-	
+	stream.WriteString("q\n") // Save graphics state
+
 	// Draw white background
-	stream.WriteString("1 1 1 rg\n")                                // White fill color
+	stream.WriteString("1 1 1 rg\n")                                     // White fill color
 	stream.WriteString(fmt.Sprintf("0 0 %.1f %.1f re\n", width, height)) // Rectangle covering entire field
-	stream.WriteString("f\n")                                       // Fill rectangle
-	
+	stream.WriteString("f\n")                                            // Fill rectangle
+
 	// Draw text
 	stream.WriteString("BT\n")                                      // Begin text
 	stream.WriteString("/F1 ")                                      // Use font F1 (must be in Resources)
@@ -275,7 +275,8 @@ func (context *SignContext) fillInitialsFields() error {
 
 				// If this is the field name (/T) and it's encoded as UTF-16 with a BOM,
 				// decode it and write as a normal PDF string so Acrobat can use it.
-				if key == "T" {
+				switch key {
+				case "T":
 					tVal := field.Key("T").RawString()
 					b := []byte(tVal)
 					asciiT := tVal
@@ -297,11 +298,11 @@ func (context *SignContext) fillInitialsFields() error {
 						}
 					}
 					buf.WriteString(pdfString(asciiT))
-				} else if key == "DA" {
+				case "DA":
 					// normalize appearance default string
 					daVal := field.Key("DA").RawString()
 					buf.WriteString(pdfString(normalizeDA(daVal)))
-				} else {
+				default:
 					context.serializeCatalogEntry(&buf, ptr.GetID(), field.Key(key))
 				}
 				buf.WriteString("\n")
@@ -366,7 +367,8 @@ func (context *SignContext) fillInitialsFields() error {
 					kbuf.WriteString(" ")
 
 					// Handle widget /T similarly: decode UTF-16 BOM if present
-					if kkey == "T" {
+					switch kkey {
+					case "T":
 						tVal := kid.Key("T").RawString()
 						b := []byte(tVal)
 						asciiT := tVal
@@ -386,10 +388,10 @@ func (context *SignContext) fillInitialsFields() error {
 							}
 						}
 						kbuf.WriteString(pdfString(asciiT))
-					} else if kkey == "DA" {
+					case "DA":
 						daVal := kid.Key("DA").RawString()
 						kbuf.WriteString(pdfString(normalizeDA(daVal)))
-					} else {
+					default:
 						context.serializeCatalogEntry(&kbuf, kptr.GetID(), kid.Key(kkey))
 					}
 					kbuf.WriteString("\n")
