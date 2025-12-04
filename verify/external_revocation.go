@@ -41,15 +41,8 @@ func performExternalOCSPCheckWithFunc(cert, issuer *x509.Certificate, options *V
 		return nil, fmt.Errorf("failed to create OCSP request: %v", err)
 	}
 
-	// Get HTTP client with timeout
-	client := options.HTTPClient
-	if client == nil {
-		timeout := options.HTTPTimeout
-		if timeout == 0 {
-			timeout = 10 * time.Second
-		}
-		client = &http.Client{Timeout: timeout}
-	}
+	// Get HTTP client with timeout and proxy support
+	client := getHTTPClient(options)
 
 	// Try each OCSP server URL
 	var lastErr error
@@ -101,15 +94,8 @@ func performExternalCRLCheck(cert *x509.Certificate, options *VerifyOptions) (*t
 		return nil, false, fmt.Errorf("certificate has no CRL distribution points")
 	}
 
-	// Get HTTP client with timeout
-	client := options.HTTPClient
-	if client == nil {
-		timeout := options.HTTPTimeout
-		if timeout == 0 {
-			timeout = 10 * time.Second
-		}
-		client = &http.Client{Timeout: timeout}
-	}
+	// Get HTTP client with timeout and proxy support
+	client := getHTTPClient(options)
 
 	// Try each CRL distribution point
 	var lastErr error

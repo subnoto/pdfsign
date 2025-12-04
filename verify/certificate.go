@@ -240,31 +240,47 @@ func buildCertificateChainsWithOptions(p7 *pkcs7.PKCS7, info *common.SignatureIn
 		// Perform external revocation checks if enabled
 		if options.EnableExternalRevocationCheck {
 			// External OCSP check
-			if !c.OCSPEmbedded && len(cert.OCSPServer) > 0 && len(chain) > 0 && len(chain[0]) > 1 {
-				issuer := chain[0][1]
-				if externalOCSPResp, err := performExternalOCSPCheck(cert, issuer, options); err == nil {
-					c.OCSPResponse = externalOCSPResp
-					c.OCSPExternal = true
+			if !c.OCSPEmbedded && len(cert.OCSPServer) > 0 {
+				// Try to get issuer from chain first
+				var issuer *x509.Certificate
+				if len(chain) > 0 && len(chain[0]) > 1 {
+					issuer = chain[0][1]
+				} else {
+					// If chain validation failed, try to find issuer from certificate pool
+					for _, candidate := range p7.Certificates {
+						if cert.Issuer.String() == candidate.Subject.String() {
+							issuer = candidate
+							break
+						}
+					}
+				}
 
-					if externalOCSPResp.Status != ocsp.Good {
-						c.RevocationTime = &externalOCSPResp.RevokedAt
-						// Check if revocation occurred before signing
-						revokedBeforeSigning := isRevokedBeforeSigning(externalOCSPResp.RevokedAt, validation.VerificationTime, validation.TimeSource)
-						c.RevokedBeforeSigning = revokedBeforeSigning
+				// Only perform OCSP check if we have an issuer certificate
+				if issuer != nil {
+					if externalOCSPResp, err := performExternalOCSPCheck(cert, issuer, options); err == nil {
+						c.OCSPResponse = externalOCSPResp
+						c.OCSPExternal = true
 
-						if revokedBeforeSigning {
-							validation.RevokedCertificate = true
-						} else {
-							// Add warning that certificate was revoked after signing
-							if validation.TimeSource == "embedded_timestamp" {
-								validation.TimeWarnings = append(validation.TimeWarnings,
-									fmt.Sprintf("Certificate was revoked after signing time (external OCSP - revoked: %v, signed: %v)",
-										externalOCSPResp.RevokedAt, validation.VerificationTime))
-							} else {
-								// Without trusted timestamp, we must assume revocation invalidates signature
+						if externalOCSPResp.Status != ocsp.Good {
+							c.RevocationTime = &externalOCSPResp.RevokedAt
+							// Check if revocation occurred before signing
+							revokedBeforeSigning := isRevokedBeforeSigning(externalOCSPResp.RevokedAt, validation.VerificationTime, validation.TimeSource)
+							c.RevokedBeforeSigning = revokedBeforeSigning
+
+							if revokedBeforeSigning {
 								validation.RevokedCertificate = true
-								validation.TimeWarnings = append(validation.TimeWarnings,
-									"Certificate revoked (external OCSP), but cannot determine if revocation occurred before or after signing without trusted timestamp")
+							} else {
+								// Add warning that certificate was revoked after signing
+								if validation.TimeSource == "embedded_timestamp" {
+									validation.TimeWarnings = append(validation.TimeWarnings,
+										fmt.Sprintf("Certificate was revoked after signing time (external OCSP - revoked: %v, signed: %v)",
+											externalOCSPResp.RevokedAt, validation.VerificationTime))
+								} else {
+									// Without trusted timestamp, we must assume revocation invalidates signature
+									validation.RevokedCertificate = true
+									validation.TimeWarnings = append(validation.TimeWarnings,
+										"Certificate revoked (external OCSP), but cannot determine if revocation occurred before or after signing without trusted timestamp")
+								}
 							}
 						}
 					}
