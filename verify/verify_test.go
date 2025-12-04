@@ -488,4 +488,9 @@ func TestVerifyFileWithExternalRevocationTestFile51(t *testing.T) {
 	if !externalCheckAttempted {
 		t.Logf("Note: External revocation checks were not successful (likely due to network issues or invalid URLs)")
 	}
+
+	// Log trusted issuer status for each signature
+	for i, sig := range response.Signatures {
+		t.Logf("Signature %d - Trusted issuer: %v", i+1, sig.Validation.TrustedIssuer)
+	}
 }
