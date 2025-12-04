@@ -229,7 +229,8 @@ func main() {
 package main
 
 import (
-    "net/http"
+    "net/url"
+    "os"
     "time"
 
     "github.com/subnoto/pdfsign/verify"
@@ -248,10 +249,20 @@ func main() {
     options.ValidateTimestampCertificates = true  // Always validate timestamp certs
     options.HTTPTimeout = 15 * time.Second
 
-    // Optional: Custom HTTP client for proxy support
-    options.HTTPClient = &http.Client{
-        Timeout: 20 * time.Second,
+    // Optional: Configure proxy support
+    // Option 1: Use environment variables (HTTP_PROXY, HTTPS_PROXY, NO_PROXY)
+    // The library will automatically use these if ProxyURL is not set
+    
+    // Option 2: Set explicit proxy URL
+    proxyURL, err := url.Parse("http://proxy.example.com:3128")
+    if err == nil {
+        options.ProxyURL = proxyURL
     }
+    
+    // Option 3: Custom HTTP client with proxy support
+    // options.HTTPClient = &http.Client{
+    //     Timeout: 20 * time.Second,
+    // }
 
     response, err := verify.VerifyFileWithOptions(file, options)
     if err != nil {
@@ -301,6 +312,7 @@ func main() {
 | `EnableExternalRevocationCheck` | bool            | `false` | Perform OCSP and CRL checks via network requests                                               |
 | `HTTPClient`                    | `*http.Client`  | `nil`   | Custom HTTP client for external checks (proxy support)                                         |
 | `HTTPTimeout`                   | `time.Duration` | `10s`   | Timeout for external revocation checking requests                                              |
+| `ProxyURL`                      | `*url.URL`      | `nil`   | Explicit proxy URL for HTTP requests. If nil, uses HTTP_PROXY/HTTPS_PROXY environment variables |
 | `RequireDigitalSignatureKU`     | bool            | `true`  | Require Digital Signature key usage in certificates                                            |
 | `AllowNonRepudiationKU`         | bool            | `true`  | Allow Non-Repudiation key usage (recommended for PDF signing)                                  |
 | `TrustSignatureTime`            | bool            | `false` | Trust the signature time embedded in the PDF if no timestamp is present (untrusted by default) |

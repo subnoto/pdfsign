@@ -6,6 +6,7 @@ package verify
 import (
 	"crypto/x509"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/subnoto/pdfsign/common"
@@ -69,6 +70,11 @@ type VerifyOptions struct {
 	// HTTPTimeout specifies the timeout for HTTP requests during external revocation checking
 	// If zero, a default timeout of 10 seconds will be used
 	HTTPTimeout time.Duration
+
+	// ProxyURL specifies an explicit proxy URL to use for HTTP requests
+	// If nil, proxy settings from HTTP_PROXY/HTTPS_PROXY environment variables will be used
+	// This is useful when you need to override environment proxy settings or set a proxy programmatically
+	ProxyURL *url.URL
 }
 
 // SignatureValidation contains validation results and technical details
