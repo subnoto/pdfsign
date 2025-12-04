@@ -129,6 +129,14 @@ func buildCertificateChainsWithOptions(p7 *pkcs7.PKCS7, info *common.SignatureIn
 		}
 	}
 
+	// Load system root CAs explicitly to ensure newly added certificates are included
+	systemRoots, err := x509.SystemCertPool()
+	if err != nil {
+		// If SystemCertPool fails, fall back to nil which will use the default system cert pool
+		// (though it might be cached and not include newly added certs)
+		systemRoots = nil
+	}
+
 	// Helper function to create x509.VerifyOptions with the appropriate time
 	createVerifyOptions := func(roots, intermediates *x509.CertPool) x509.VerifyOptions {
 		opts := x509.VerifyOptions{
@@ -155,7 +163,7 @@ func buildCertificateChainsWithOptions(p7 *pkcs7.PKCS7, info *common.SignatureIn
 		c.KeyUsageValid, c.KeyUsageError, c.ExtKeyUsageValid, c.ExtKeyUsageError = validateKeyUsage(cert, options, isSigningCert)
 
 		// Try to verify with system root CAs first
-		chain, err := cert.Verify(createVerifyOptions(nil, certPool))
+		chain, err := cert.Verify(createVerifyOptions(systemRoots, certPool))
 
 		if err == nil {
 			// Successfully verified against system trusted roots
