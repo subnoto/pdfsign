@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"golang.org/x/crypto/ocsp"
 )
@@ -15,19 +14,30 @@ import (
 type OCSPRequestFunc func(cert, issuer *x509.Certificate) ([]byte, error)
 
 // performExternalOCSPCheck performs an external OCSP check for the given certificate
-func performExternalOCSPCheck(cert, issuer *x509.Certificate, options *VerifyOptions) (*ocsp.Response, error) {
+func performExternalOCSPCheck(cert, issuer *x509.Certificate, options *VerifyOptions) ExternalOCSPResult {
 	return performExternalOCSPCheckWithFunc(cert, issuer, options, nil)
 }
 
 // performExternalOCSPCheckWithFunc allows injecting a custom OCSP request function for testing
-func performExternalOCSPCheckWithFunc(cert, issuer *x509.Certificate, options *VerifyOptions, ocspRequestFunc OCSPRequestFunc) (*ocsp.Response, error) {
+func performExternalOCSPCheckWithFunc(cert, issuer *x509.Certificate, options *VerifyOptions, ocspRequestFunc OCSPRequestFunc) ExternalOCSPResult {
+	result := ExternalOCSPResult{
+		Checked: false,
+		Valid:   false,
+	}
+
 	if !options.EnableExternalRevocationCheck {
-		return nil, fmt.Errorf("external revocation checking is disabled")
+		result.Checked = true
+		result.Warning = "external revocation checking is disabled"
+		return result
 	}
 
 	if len(cert.OCSPServer) == 0 {
-		return nil, fmt.Errorf("certificate has no OCSP server URLs")
+		result.Checked = true
+		result.Warning = "certificate has no OCSP server URLs"
+		return result
 	}
+
+	result.Checked = true
 
 	// Create OCSP request (use injected func if provided)
 	var ocspReq []byte
@@ -38,7 +48,8 @@ func performExternalOCSPCheckWithFunc(cert, issuer *x509.Certificate, options *V
 		ocspReq, err = ocsp.CreateRequest(cert, issuer, nil)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to create OCSP request: %v", err)
+		result.Warning = fmt.Sprintf("failed to create OCSP request: %v", err)
+		return result
 	}
 
 	// Get HTTP client with timeout and proxy support
@@ -77,22 +88,41 @@ func performExternalOCSPCheckWithFunc(cert, issuer *x509.Certificate, options *V
 		}
 
 		// Successfully got OCSP response
-		return ocspResp, nil
+		result.Valid = true
+		result.Response = ocspResp
+		return result
 	}
 
-	return nil, lastErr
+	// All attempts failed
+	if lastErr != nil {
+		result.Warning = lastErr.Error()
+	} else {
+		result.Warning = "failed to retrieve OCSP response from all servers"
+	}
+	return result
 }
 
 // performExternalCRLCheck performs an external CRL check for the given certificate
-// Returns (revocationTime, isRevoked, error)
-func performExternalCRLCheck(cert *x509.Certificate, options *VerifyOptions) (*time.Time, bool, error) {
+func performExternalCRLCheck(cert *x509.Certificate, options *VerifyOptions) ExternalCRLResult {
+	result := ExternalCRLResult{
+		Checked:   false,
+		Valid:     false,
+		IsRevoked: false,
+	}
+
 	if !options.EnableExternalRevocationCheck {
-		return nil, false, fmt.Errorf("external revocation checking is disabled")
+		result.Checked = true
+		result.Warning = "external revocation checking is disabled"
+		return result
 	}
 
 	if len(cert.CRLDistributionPoints) == 0 {
-		return nil, false, fmt.Errorf("certificate has no CRL distribution points")
+		result.Checked = true
+		result.Warning = "certificate has no CRL distribution points"
+		return result
 	}
+
+	result.Checked = true
 
 	// Get HTTP client with timeout and proxy support
 	client := getHTTPClient(options)
@@ -129,16 +159,27 @@ func performExternalCRLCheck(cert *x509.Certificate, options *VerifyOptions) (*t
 			continue
 		}
 
+		// Successfully parsed CRL
+		result.Valid = true
+
 		// Check if certificate is revoked
 		for _, revokedCert := range crl.RevokedCertificateEntries {
 			if revokedCert.SerialNumber.Cmp(cert.SerialNumber) == 0 {
-				return &revokedCert.RevocationTime, true, nil // Certificate is revoked
+				result.IsRevoked = true
+				result.RevocationTime = &revokedCert.RevocationTime
+				return result // Certificate is revoked
 			}
 		}
 
 		// Successfully checked CRL, certificate not revoked
-		return nil, false, nil
+		return result
 	}
 
-	return nil, false, lastErr
+	// All attempts failed
+	if lastErr != nil {
+		result.Warning = lastErr.Error()
+	} else {
+		result.Warning = "failed to retrieve CRL from all distribution points"
+	}
+	return result
 }

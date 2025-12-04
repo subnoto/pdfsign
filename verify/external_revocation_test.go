@@ -23,12 +23,13 @@ func TestPerformExternalOCSPCheck(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		setupServer   func() *httptest.Server
-		setupOptions  func(serverURL string) *VerifyOptions
-		setupCert     func(serverURL string) *x509.Certificate
-		expectError   bool
-		errorContains string
+		name            string
+		setupServer     func() *httptest.Server
+		setupOptions    func(serverURL string) *VerifyOptions
+		setupCert       func(serverURL string) *x509.Certificate
+		expectChecked   bool
+		expectValid     bool
+		warningContains string
 	}{
 		{
 			name: "External revocation disabled",
@@ -40,8 +41,9 @@ func TestPerformExternalOCSPCheck(t *testing.T) {
 			setupCert: func(serverURL string) *x509.Certificate {
 				return cert
 			},
-			expectError:   true,
-			errorContains: "external revocation checking is disabled",
+			expectChecked:   true,
+			expectValid:     false,
+			warningContains: "external revocation checking is disabled",
 		},
 		{
 			name: "No OCSP server URLs",
@@ -55,11 +57,12 @@ func TestPerformExternalOCSPCheck(t *testing.T) {
 				testCert.OCSPServer = []string{}
 				return &testCert
 			},
-			expectError:   true,
-			errorContains: "certificate has no OCSP server URLs",
+			expectChecked:   true,
+			expectValid:     false,
+			warningContains: "certificate has no OCSP server URLs",
 		},
 		{
-			name: "OCSP server returns valid response",
+			name: "OCSP server returns invalid response",
 			setupServer: func() *httptest.Server {
 				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.Method != "POST" {
@@ -85,8 +88,9 @@ func TestPerformExternalOCSPCheck(t *testing.T) {
 				testCert.OCSPServer = []string{serverURL}
 				return &testCert
 			},
-			expectError:   true, // Will fail parsing the mock response
-			errorContains: "failed to parse OCSP response",
+			expectChecked:   true,
+			expectValid:     false,
+			warningContains: "failed to parse OCSP response",
 		},
 		{
 			name: "OCSP server returns error status",
@@ -105,8 +109,9 @@ func TestPerformExternalOCSPCheck(t *testing.T) {
 				testCert.OCSPServer = []string{serverURL}
 				return &testCert
 			},
-			expectError:   true,
-			errorContains: "returned status 500",
+			expectChecked:   true,
+			expectValid:     false,
+			warningContains: "returned status 500",
 		},
 		{
 			name: "Custom HTTP client",
@@ -129,8 +134,9 @@ func TestPerformExternalOCSPCheck(t *testing.T) {
 				testCert.OCSPServer = []string{serverURL}
 				return &testCert
 			},
-			expectError:   true,
-			errorContains: "failed to parse OCSP response",
+			expectChecked:   true,
+			expectValid:     false,
+			warningContains: "failed to parse OCSP response",
 		},
 	}
 
@@ -156,17 +162,19 @@ func TestPerformExternalOCSPCheck(t *testing.T) {
 				}
 			}
 
-			_, err := performExternalOCSPCheckWithFunc(testCert, issuer, options, ocspRequestFunc)
+			result := performExternalOCSPCheckWithFunc(testCert, issuer, options, ocspRequestFunc)
 
-			if tt.expectError {
-				if err == nil {
-					t.Error("Expected error but got none")
-				} else if tt.errorContains != "" && !containsString(err.Error(), tt.errorContains) {
-					t.Errorf("Expected error to contain '%s', got: %v", tt.errorContains, err)
-				}
-			} else {
-				if err != nil {
-					t.Errorf("Unexpected error: %v", err)
+			if result.Checked != tt.expectChecked {
+				t.Errorf("Expected Checked=%v, got %v", tt.expectChecked, result.Checked)
+			}
+			if result.Valid != tt.expectValid {
+				t.Errorf("Expected Valid=%v, got %v", tt.expectValid, result.Valid)
+			}
+			if tt.warningContains != "" {
+				if result.Warning == "" {
+					t.Errorf("Expected warning containing '%s', but got empty warning", tt.warningContains)
+				} else if !containsString(result.Warning, tt.warningContains) {
+					t.Errorf("Expected warning to contain '%s', got: %s", tt.warningContains, result.Warning)
 				}
 			}
 		})
@@ -180,13 +188,14 @@ func TestPerformExternalCRLCheck(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		setupServer   func() *httptest.Server
-		setupOptions  func(serverURL string) *VerifyOptions
-		setupCert     func(serverURL string) *x509.Certificate
-		expectError   bool
-		errorContains string
-		expectRevoked bool
+		name            string
+		setupServer     func() *httptest.Server
+		setupOptions    func(serverURL string) *VerifyOptions
+		setupCert       func(serverURL string) *x509.Certificate
+		expectChecked   bool
+		expectValid     bool
+		expectRevoked   bool
+		warningContains string
 	}{
 		{
 			name: "External revocation disabled",
@@ -198,8 +207,10 @@ func TestPerformExternalCRLCheck(t *testing.T) {
 			setupCert: func(serverURL string) *x509.Certificate {
 				return cert
 			},
-			expectError:   true,
-			errorContains: "external revocation checking is disabled",
+			expectChecked:   true,
+			expectValid:     false,
+			expectRevoked:   false,
+			warningContains: "external revocation checking is disabled",
 		},
 		{
 			name: "No CRL distribution points",
@@ -213,8 +224,10 @@ func TestPerformExternalCRLCheck(t *testing.T) {
 				testCert.CRLDistributionPoints = []string{}
 				return &testCert
 			},
-			expectError:   true,
-			errorContains: "certificate has no CRL distribution points",
+			expectChecked:   true,
+			expectValid:     false,
+			expectRevoked:   false,
+			warningContains: "certificate has no CRL distribution points",
 		},
 		{
 			name: "CRL server returns error status",
@@ -233,8 +246,10 @@ func TestPerformExternalCRLCheck(t *testing.T) {
 				testCert.CRLDistributionPoints = []string{serverURL}
 				return &testCert
 			},
-			expectError:   true,
-			errorContains: "returned status 404",
+			expectChecked:   true,
+			expectValid:     false,
+			expectRevoked:   false,
+			warningContains: "returned status 404",
 		},
 		{
 			name: "CRL server returns invalid CRL",
@@ -254,8 +269,10 @@ func TestPerformExternalCRLCheck(t *testing.T) {
 				testCert.CRLDistributionPoints = []string{serverURL}
 				return &testCert
 			},
-			expectError:   true,
-			errorContains: "failed to parse CRL",
+			expectChecked:   true,
+			expectValid:     false,
+			expectRevoked:   false,
+			warningContains: "failed to parse CRL",
 		},
 		{
 			name: "Multiple CRL URLs with first failing",
@@ -279,8 +296,10 @@ func TestPerformExternalCRLCheck(t *testing.T) {
 				}
 				return &testCert
 			},
-			expectError:   true,
-			errorContains: "failed to parse CRL",
+			expectChecked:   true,
+			expectValid:     false,
+			expectRevoked:   false,
+			warningContains: "failed to parse CRL",
 		},
 		{
 			name: "Custom HTTP client with timeout",
@@ -303,8 +322,10 @@ func TestPerformExternalCRLCheck(t *testing.T) {
 				testCert.CRLDistributionPoints = []string{serverURL}
 				return &testCert
 			},
-			expectError:   true,
-			errorContains: "failed to parse CRL",
+			expectChecked:   true,
+			expectValid:     false,
+			expectRevoked:   false,
+			warningContains: "failed to parse CRL",
 		},
 	}
 
@@ -322,24 +343,26 @@ func TestPerformExternalCRLCheck(t *testing.T) {
 			options := tt.setupOptions(serverURL)
 			testCert := tt.setupCert(serverURL)
 
-			revocationTime, isRevoked, err := performExternalCRLCheck(testCert, options)
+			result := performExternalCRLCheck(testCert, options)
 
-			if tt.expectError {
-				if err == nil {
-					t.Error("Expected error but got none")
-				} else if tt.errorContains != "" && !containsString(err.Error(), tt.errorContains) {
-					t.Errorf("Expected error to contain '%s', got: %v", tt.errorContains, err)
+			if result.Checked != tt.expectChecked {
+				t.Errorf("Expected Checked=%v, got %v", tt.expectChecked, result.Checked)
+			}
+			if result.Valid != tt.expectValid {
+				t.Errorf("Expected Valid=%v, got %v", tt.expectValid, result.Valid)
+			}
+			if result.IsRevoked != tt.expectRevoked {
+				t.Errorf("Expected IsRevoked=%v, got %v", tt.expectRevoked, result.IsRevoked)
+			}
+			if tt.warningContains != "" {
+				if result.Warning == "" {
+					t.Errorf("Expected warning containing '%s', but got empty warning", tt.warningContains)
+				} else if !containsString(result.Warning, tt.warningContains) {
+					t.Errorf("Expected warning to contain '%s', got: %s", tt.warningContains, result.Warning)
 				}
-			} else {
-				if err != nil {
-					t.Errorf("Unexpected error: %v", err)
-				}
-				if isRevoked != tt.expectRevoked {
-					t.Errorf("Expected revoked=%v, got %v", tt.expectRevoked, isRevoked)
-				}
-				if tt.expectRevoked && revocationTime == nil {
-					t.Error("Expected revocation time when certificate is revoked")
-				}
+			}
+			if tt.expectRevoked && result.RevocationTime == nil {
+				t.Error("Expected revocation time when certificate is revoked")
 			}
 		})
 	}
@@ -470,13 +493,19 @@ func TestExternalRevocationWithTestFile51(t *testing.T) {
 				testCert.OCSPServer = originalOCSP
 			}()
 
-			_, err := performExternalOCSPCheckWithFunc(testCert, issuer, options, ocspRequestFunc)
+			result := performExternalOCSPCheckWithFunc(testCert, issuer, options, ocspRequestFunc)
 
-			// We expect an error because the mock response won't parse correctly
-			if err == nil {
-				t.Error("Expected error parsing mock OCSP response, but got none")
-			} else if !containsString(err.Error(), "failed to parse OCSP response") {
-				t.Errorf("Expected parsing error, got: %v", err)
+			// We expect the check to be attempted but fail because the mock response won't parse correctly
+			if !result.Checked {
+				t.Error("Expected Checked=true, but got false")
+			}
+			if result.Valid {
+				t.Error("Expected Valid=false because mock response won't parse, but got true")
+			}
+			if result.Warning == "" {
+				t.Error("Expected warning message, but got empty")
+			} else if !containsString(result.Warning, "failed to parse OCSP response") {
+				t.Errorf("Expected warning to contain 'failed to parse OCSP response', got: %s", result.Warning)
 			}
 		})
 	}
@@ -507,13 +536,19 @@ func TestExternalRevocationWithTestFile51(t *testing.T) {
 				testCert.CRLDistributionPoints = originalCRL
 			}()
 
-			_, _, err := performExternalCRLCheck(testCert, options)
+			result := performExternalCRLCheck(testCert, options)
 
-			// We expect an error because the mock CRL won't parse correctly
-			if err == nil {
-				t.Error("Expected error parsing mock CRL, but got none")
-			} else if !containsString(err.Error(), "failed to parse CRL") {
-				t.Errorf("Expected parsing error, got: %v", err)
+			// We expect the check to be attempted but fail because the mock CRL won't parse correctly
+			if !result.Checked {
+				t.Error("Expected Checked=true, but got false")
+			}
+			if result.Valid {
+				t.Error("Expected Valid=false because mock CRL won't parse, but got true")
+			}
+			if result.Warning == "" {
+				t.Error("Expected warning message, but got empty")
+			} else if !containsString(result.Warning, "failed to parse CRL") {
+				t.Errorf("Expected warning to contain 'failed to parse CRL', got: %s", result.Warning)
 			}
 		})
 	}
