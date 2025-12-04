@@ -253,7 +253,7 @@ func TestSignPDFInitials(t *testing.T) {
 	}
 
 	inputFilePath := "../testfiles/testfile50.pdf"
-	var lastSignedFile string = inputFilePath
+	lastSignedFile := inputFilePath
 	for _, tc := range tests {
 		tmpfile, err := os.CreateTemp("", "sign_initials_")
 		if err != nil {
@@ -287,26 +287,26 @@ func TestSignPDFInitials(t *testing.T) {
 		}
 		sfi, err := sf.Stat()
 		if err != nil {
-			sf.Close()
+			_ = sf.Close()
 			_ = os.Remove(tmpfile.Name())
 			t.Fatalf("stat failed: %v", err)
 		}
 		rdr, err := pdf.NewReader(sf, sfi.Size())
 		if err != nil {
-			sf.Close()
+			_ = sf.Close()
 			_ = os.Remove(tmpfile.Name())
 			t.Fatalf("pdf reader failed: %v", err)
 		}
 
 		acro := rdr.Trailer().Key("Root").Key("AcroForm")
 		if acro.IsNull() {
-			sf.Close()
+			_ = sf.Close()
 			_ = os.Remove(tmpfile.Name())
 			t.Fatalf("signed PDF missing AcroForm")
 		}
 		fields := acro.Key("Fields")
 		if fields.IsNull() {
-			sf.Close()
+			_ = sf.Close()
 			_ = os.Remove(tmpfile.Name())
 			t.Fatalf("signed PDF AcroForm missing Fields")
 		}
@@ -356,7 +356,7 @@ func TestSignPDFInitials(t *testing.T) {
 			}
 		}
 
-		sf.Close()
+		_ = sf.Close()
 
 		if !found {
 			_ = os.Remove(tmpfile.Name())

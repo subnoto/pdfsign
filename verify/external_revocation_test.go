@@ -380,7 +380,7 @@ func TestExternalRevocationWithTestFile51(t *testing.T) {
 	// Find certificates with revocation URLs
 	var certsWithOCSP []*x509.Certificate
 	var certsWithCRL []*x509.Certificate
-	var issuerCerts map[string]*x509.Certificate = make(map[string]*x509.Certificate)
+	issuerCerts := make(map[string]*x509.Certificate)
 
 	for _, sig := range response.Signatures {
 		for _, certInfo := range sig.Validation.Certificates {
