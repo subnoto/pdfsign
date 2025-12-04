@@ -52,9 +52,15 @@ type Certificate struct {
 	OCSPResponse         *ocsp.Response    `json:"ocsp_response"`
 	OCSPEmbedded         bool              `json:"ocsp_embedded"`
 	OCSPExternal         bool              `json:"ocsp_external"`
+	OCSPExternalChecked  bool              `json:"ocsp_external_checked"`  // Whether external OCSP check was attempted
+	OCSPExternalValid    bool              `json:"ocsp_external_valid"`    // Whether external OCSP check succeeded
+	OCSPExternalWarning  string            `json:"ocsp_external_warning,omitempty"` // Warning if external OCSP check failed
 	CRLRevoked           time.Time         `json:"crl_revoked"`
 	CRLEmbedded          bool              `json:"crl_embedded"`
 	CRLExternal          bool              `json:"crl_external"`
+	CRLExternalChecked   bool              `json:"crl_external_checked"`   // Whether external CRL check was attempted
+	CRLExternalValid     bool              `json:"crl_external_valid"`      // Whether external CRL check succeeded
+	CRLExternalWarning   string            `json:"crl_external_warning,omitempty"` // Warning if external CRL check failed
 	RevocationWarning    string            `json:"revocation_warning,omitempty"`
 	RevocationTime       *time.Time        `json:"revocation_time,omitempty"` // When the certificate was revoked (if applicable)
 	RevokedBeforeSigning bool              `json:"revoked_before_signing"`    // Whether revocation occurred before signing

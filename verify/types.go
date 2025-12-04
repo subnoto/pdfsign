@@ -9,7 +9,25 @@ import (
 	"time"
 
 	"github.com/subnoto/pdfsign/common"
+	"golang.org/x/crypto/ocsp"
 )
+
+// ExternalOCSPResult contains the result of an external OCSP check
+type ExternalOCSPResult struct {
+	Checked bool           // Whether the check was attempted
+	Valid   bool           // Whether the check succeeded and returned a valid response
+	Response *ocsp.Response // The OCSP response if valid
+	Warning string         // Warning message if check failed or was not attempted
+}
+
+// ExternalCRLResult contains the result of an external CRL check
+type ExternalCRLResult struct {
+	Checked       bool       // Whether the check was attempted
+	Valid         bool       // Whether the check succeeded and returned a valid CRL
+	IsRevoked     bool       // Whether the certificate was found revoked in the CRL
+	RevocationTime *time.Time // When the certificate was revoked (if applicable)
+	Warning       string     // Warning message if check failed or was not attempted
+}
 
 // VerifyOptions contains options for PDF signature verification
 type VerifyOptions struct {

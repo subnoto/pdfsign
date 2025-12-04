@@ -117,12 +117,23 @@ The verification command outputs JSON with the following key fields:
 | `TimeSource` | Source of verification time: "embedded_timestamp", "signature_time", or "current_time" |
 | `TimeWarnings` | Warnings about time validation (e.g., using untrusted signature time) |
 | `OCSPEmbedded` | Whether OCSP response is embedded in the PDF |
-| `OCSPExternal` | Whether external OCSP checking was performed |
+| `OCSPExternal` | Whether external OCSP checking succeeded and returned a valid response |
+| `OCSPExternalChecked` | Whether external OCSP check was attempted (always true if external checking enabled and certificate has OCSP URLs) |
+| `OCSPExternalValid` | Whether external OCSP check succeeded and returned a valid response |
+| `OCSPExternalWarning` | Warning message if external OCSP check failed or was not attempted |
 | `CRLEmbedded` | Whether CRL is embedded in the PDF |
-| `CRLExternal` | Whether external CRL checking was performed |
+| `CRLExternal` | Whether external CRL checking succeeded and returned a valid CRL |
+| `CRLExternalChecked` | Whether external CRL check was attempted (always true if external checking enabled and certificate has CRL URLs) |
+| `CRLExternalValid` | Whether external CRL check succeeded and returned a valid CRL |
+| `CRLExternalWarning` | Warning message if external CRL check failed or was not attempted |
 | `RevocationTime` | When the certificate was revoked (if applicable) |
 | `RevokedBeforeSigning` | Whether revocation occurred before the signing time |
 | `RevocationWarning` | Human-readable warning about revocation status checking |
+
+**External Revocation Checking Results**: The external revocation checking now provides structured results with clear booleans and warnings for each category (trusted issuer, OCSP, CRL) independently. This makes it crystal clear what is working and what is not:
+- `*ExternalChecked` indicates whether a check was attempted
+- `*ExternalValid` indicates whether the check succeeded
+- `*ExternalWarning` provides details when a check fails or cannot be performed
 
 ## Go Library Usage
 
@@ -247,16 +258,36 @@ func main() {
         panic(err)
     }
 
-    // Check timestamp validation results
-    for _, signer := range response.Signers {
-        fmt.Printf("Time source: %s\n", signer.TimeSource)
-        fmt.Printf("Timestamp status: %s\n", signer.TimestampStatus)
-        fmt.Printf("Timestamp trusted: %v\n", signer.TimestampTrusted)
+    // Check validation results
+    for _, sig := range response.Signatures {
+        validation := sig.Validation
+        fmt.Printf("Valid Signature: %v\n", validation.ValidSignature)
+        fmt.Printf("Trusted Issuer: %v\n", validation.TrustedIssuer)
+        fmt.Printf("Time source: %s\n", validation.TimeSource)
+        fmt.Printf("Timestamp status: %s\n", validation.TimestampStatus)
+        fmt.Printf("Timestamp trusted: %v\n", validation.TimestampTrusted)
 
-        if len(signer.TimeWarnings) > 0 {
+        if len(validation.TimeWarnings) > 0 {
             fmt.Println("Time warnings:")
-            for _, warning := range signer.TimeWarnings {
+            for _, warning := range validation.TimeWarnings {
                 fmt.Printf("  - %s\n", warning)
+            }
+        }
+
+        // Check external revocation results for each certificate
+        for i, cert := range validation.Certificates {
+            fmt.Printf("\nCertificate %d:\n", i+1)
+            fmt.Printf("  OCSP Embedded: %v\n", cert.OCSPEmbedded)
+            fmt.Printf("  OCSP External Checked: %v\n", cert.OCSPExternalChecked)
+            fmt.Printf("  OCSP External Valid: %v\n", cert.OCSPExternalValid)
+            if cert.OCSPExternalWarning != "" {
+                fmt.Printf("  OCSP External Warning: %s\n", cert.OCSPExternalWarning)
+            }
+            fmt.Printf("  CRL Embedded: %v\n", cert.CRLEmbedded)
+            fmt.Printf("  CRL External Checked: %v\n", cert.CRLExternalChecked)
+            fmt.Printf("  CRL External Valid: %v\n", cert.CRLExternalValid)
+            if cert.CRLExternalWarning != "" {
+                fmt.Printf("  CRL External Warning: %s\n", cert.CRLExternalWarning)
             }
         }
     }
