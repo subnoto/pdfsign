@@ -6,12 +6,15 @@ import (
 
 // validateKeyUsage validates certificate Key Usage and Extended Key Usage for PDF signing
 // according to RFC 9336 and common industry practices
-func validateKeyUsage(cert *x509.Certificate, options *VerifyOptions) (kuValid bool, kuError string, ekuValid bool, ekuError string) {
+// isSigningCertificate indicates whether this is the certificate that was used to sign the PDF.
+// For key usage, only the signing certificate needs Digital Signature key usage; parent certificates don't need it.
+func validateKeyUsage(cert *x509.Certificate, options *VerifyOptions, isSigningCertificate bool) (kuValid bool, kuError string, ekuValid bool, ekuError string) {
 	// Validate Key Usage - start with valid assumption
 	kuValid = true
 
-	// Check Digital Signature bit in Key Usage
-	if options.RequireDigitalSignatureKU && (cert.KeyUsage&x509.KeyUsageDigitalSignature) == 0 {
+	// Check Digital Signature bit in Key Usage - only required for the signing certificate
+	// Parent certificates don't need Digital Signature key usage
+	if isSigningCertificate && options.RequireDigitalSignatureKU && (cert.KeyUsage&x509.KeyUsageDigitalSignature) == 0 {
 		kuValid = false
 		kuError = "certificate does not have Digital Signature key usage"
 	}

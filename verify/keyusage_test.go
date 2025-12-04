@@ -127,6 +127,24 @@ func TestValidateKeyUsage(t *testing.T) {
 			expectEKU: true,
 			kuError:   "certificate does not have Digital Signature key usage; certificate does not have Non-Repudiation key usage",
 		},
+		{
+			name:        "Parent certificate without Digital Signature KU (should be valid)",
+			keyUsage:    x509.KeyUsageKeyEncipherment,             // Parent cert doesn't need Digital Signature
+			extKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsage(36)}, // Document Signing EKU
+			options:     DefaultVerifyOptions(),
+			expectKU:    true, // Parent certificates don't need Digital Signature key usage
+			expectEKU:   true,
+			kuError:     "", // No error for parent certificates
+		},
+		{
+			name:        "Signing certificate without Digital Signature KU (should be invalid)",
+			keyUsage:    x509.KeyUsageKeyEncipherment,             // Missing Digital Signature
+			extKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsage(36)}, // Document Signing EKU
+			options:     DefaultVerifyOptions(),
+			expectKU:    false, // Signing certificate MUST have Digital Signature key usage
+			expectEKU:   true,
+			kuError:     "certificate does not have Digital Signature key usage",
+		},
 	}
 
 	for _, tt := range tests {
@@ -137,7 +155,13 @@ func TestValidateKeyUsage(t *testing.T) {
 				ExtKeyUsage: tt.extKeyUsage,
 			}
 
-			kuValid, kuError, ekuValid, ekuError := validateKeyUsage(cert, tt.options)
+			// Determine if this is a signing certificate
+			isSigningCert := true
+			if tt.name == "Parent certificate without Digital Signature KU (should be valid)" {
+				isSigningCert = false // This is a parent certificate
+			}
+
+			kuValid, kuError, ekuValid, ekuError := validateKeyUsage(cert, tt.options, isSigningCert)
 
 			if kuValid != tt.expectKU {
 				t.Errorf("Expected KU valid %v, got %v", tt.expectKU, kuValid)

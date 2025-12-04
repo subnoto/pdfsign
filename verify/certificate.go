@@ -2,6 +2,8 @@ package verify
 
 import (
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/asn1"
 	"fmt"
 	"time"
 
@@ -113,6 +115,20 @@ func buildCertificateChainsWithOptions(p7 *pkcs7.PKCS7, info *common.SignatureIn
 	// Get appropriate EKUs for certificate verification
 	verificationEKUs := getVerificationEKUs()
 
+	// Identify signing certificates from the PKCS7 signers
+	// The signing certificate is the one that matches the signer's issuer and serial number
+	signingCertificates := make(map[string]bool)
+	for _, signer := range p7.Signers {
+		// Parse the issuer name from RawValue
+		var issuerName pkix.Name
+		_, err := asn1.Unmarshal(signer.IssuerAndSerialNumber.IssuerName.FullBytes, &issuerName)
+		if err == nil {
+			// Create a key from issuer and serial number to identify the signing certificate
+			signerKey := fmt.Sprintf("%s-%x", issuerName.String(), signer.IssuerAndSerialNumber.SerialNumber)
+			signingCertificates[signerKey] = true
+		}
+	}
+
 	// Helper function to create x509.VerifyOptions with the appropriate time
 	createVerifyOptions := func(roots, intermediates *x509.CertPool) x509.VerifyOptions {
 		opts := x509.VerifyOptions{
@@ -130,8 +146,13 @@ func buildCertificateChainsWithOptions(p7 *pkcs7.PKCS7, info *common.SignatureIn
 		var c common.Certificate
 		c.Certificate = cert
 
+		// Check if this is a signing certificate by matching issuer and serial number
+		certKey := fmt.Sprintf("%s-%x", cert.Issuer.String(), cert.SerialNumber)
+		isSigningCert := signingCertificates[certKey]
+
 		// Validate Key Usage and Extended Key Usage for PDF signing
-		c.KeyUsageValid, c.KeyUsageError, c.ExtKeyUsageValid, c.ExtKeyUsageError = validateKeyUsage(cert, options)
+		// Only the signing certificate needs Digital Signature key usage; parent certificates don't need it
+		c.KeyUsageValid, c.KeyUsageError, c.ExtKeyUsageValid, c.ExtKeyUsageError = validateKeyUsage(cert, options, isSigningCert)
 
 		// Try to verify with system root CAs first
 		chain, err := cert.Verify(createVerifyOptions(nil, certPool))
