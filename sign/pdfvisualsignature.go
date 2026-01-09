@@ -125,9 +125,57 @@ func (context *SignContext) createIncPageUpdate(pageNumber, annot uint32) ([]byt
 
 	page_buffer.WriteString("<<\n")
 
+	// Ensure Type is always written first (required for page objects)
+	typeVal := page.Key("Type")
+	if !typeVal.IsNull() {
+		// Safely get the type name
+		var typeName string
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					typeName = "Page" // fallback
+				}
+			}()
+			typeName = typeVal.Name()
+		}()
+		if typeName != "" {
+			page_buffer.WriteString(fmt.Sprintf("  /Type /%s\n", typeName))
+		} else {
+			// Fallback: ensure Type is present
+			page_buffer.WriteString("  /Type /Page\n")
+		}
+	} else {
+		// Type is missing, add it (required for page objects)
+		page_buffer.WriteString("  /Type /Page\n")
+	}
+
+	// Check for MediaBox - it's required and might be inherited from parent
+	// If missing from page, try to get it from parent Pages node
+	mediaBox := page.Key("MediaBox")
+	if mediaBox.IsNull() {
+		parent := page.Key("Parent")
+		if !parent.IsNull() {
+			// Try to get MediaBox from parent
+			parentMediaBox := parent.Key("MediaBox")
+			if !parentMediaBox.IsNull() {
+				mediaBox = parentMediaBox
+			}
+		}
+	}
+	// If we found MediaBox (from page or parent), write it
+	if !mediaBox.IsNull() {
+		page_buffer.WriteString("  /MediaBox ")
+		pagePtr := page.GetPtr()
+		context.serializeCatalogEntry(&page_buffer, pagePtr.GetID(), mediaBox)
+		page_buffer.WriteString("\n")
+	}
+
 	// TODO: Update digitorus/pdf to get raw values without resolving pointers
 	for _, key := range page.Keys() {
 		switch key {
+		case "Type":
+			// Already handled above, skip
+			continue
 		case "Parent":
 			ptr := page.Key(key).GetPtr()
 			page_buffer.WriteString(fmt.Sprintf("  /%s %d 0 R\n", key, ptr.GetID()))
@@ -165,6 +213,12 @@ func (context *SignContext) createIncPageUpdate(pageNumber, annot uint32) ([]byt
 			}
 			page_buffer.WriteString(fmt.Sprintf("    %d 0 R\n", annot))
 			page_buffer.WriteString("  ]\n")
+		case "MediaBox", "CropBox", "BleedBox", "TrimBox", "ArtBox", "Rotate", "Resources":
+			// These are common page entries that should be preserved
+			// Use serializeCatalogEntry to handle them properly
+			pagePtr := page.GetPtr()
+			context.serializeCatalogEntry(&page_buffer, pagePtr.GetID(), page.Key(key))
+			page_buffer.WriteString("\n")
 		default:
 			// Safely get string representation - check for pointer first to avoid objptr errors
 			val := page.Key(key)
