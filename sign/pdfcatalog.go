@@ -99,13 +99,31 @@ func (context *SignContext) createCatalog() ([]byte, error) {
 			// DA (Default Appearance) must be a string, not a dict.
 			if key == "DA" {
 				daValue := acro.Key("DA")
-				if daValue.Kind() == pdf.Dict {
+				// Safely check the kind - if it's a pointer, handle it differently
+				if ptr := daValue.GetPtr(); ptr.GetID() != 0 {
+					// It's an indirect reference, serialize it
+					_, _ = fmt.Fprintf(&catalog_buffer, "    /%s ", key)
+					context.serializeCatalogEntry(&catalog_buffer, rootPtr.GetID(), daValue)
+					catalog_buffer.WriteString("\n")
+					continue
+				}
+				// Try to get the kind safely
+				var daKind pdf.Kind
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							daKind = pdf.Null
+						}
+					}()
+					daKind = daValue.Kind()
+				}()
+				if daKind == pdf.Dict {
 					// Invalid: DA should be a string, not a dict. Skip it.
 					continue
 				}
 				// Ensure DA is written as a string
 				_, _ = fmt.Fprintf(&catalog_buffer, "    /%s ", key)
-				if daValue.Kind() == pdf.String {
+				if daKind == pdf.String {
 					_, _ = fmt.Fprintf(&catalog_buffer, "(%s)", daValue.RawString())
 				} else {
 					context.serializeCatalogEntry(&catalog_buffer, rootPtr.GetID(), daValue)
@@ -200,14 +218,44 @@ func (context *SignContext) createCatalog() ([]byte, error) {
 
 // serializeCatalogEntry takes a pdf.Value and serializes it to the given writer.
 func (context *SignContext) serializeCatalogEntry(w io.Writer, rootObjId uint32, value pdf.Value) {
-	if ptr := value.GetPtr(); ptr.GetID() != rootObjId {
-		// Indirect object
+	// Check if this is an indirect reference first
+	ptr := value.GetPtr()
+	if ptr.GetID() != 0 && ptr.GetID() != rootObjId {
+		// Indirect object - write as reference
 		_, _ = fmt.Fprintf(w, "%d %d R", ptr.GetID(), ptr.GetGen())
 		return
 	}
 
-	// Direct object
-	switch value.Kind() {
+	// For direct objects, we need to safely get the kind without triggering resolve errors
+	// If GetPtr() returns a non-zero ID that matches rootObjId, it's still a direct object
+	// but we need to be careful when calling .Kind() as it might trigger resolve
+
+	// Try to get the kind, but handle potential objptr errors
+	var kind pdf.Kind
+	var kindError bool
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// If we get an error trying to get the kind, it's likely an unresolved objptr
+				kindError = true
+			}
+		}()
+		kind = value.Kind()
+	}()
+
+	// If we got an error getting the kind, treat it as an indirect reference
+	if kindError {
+		if ptr.GetID() != 0 {
+			_, _ = fmt.Fprintf(w, "%d %d R", ptr.GetID(), ptr.GetGen())
+			return
+		}
+		// Fallback: treat as null if we can't determine
+		_, _ = fmt.Fprint(w, "null")
+		return
+	}
+
+	// Direct object - serialize based on kind
+	switch kind {
 	case pdf.String:
 		_, _ = fmt.Fprintf(w, "(%s)", value.RawString())
 	case pdf.Null:

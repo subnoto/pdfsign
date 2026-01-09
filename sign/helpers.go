@@ -16,10 +16,27 @@ import (
 )
 
 func findFirstPage(parent pdf.Value) (pdf.Value, error) {
-	value_type := parent.Key("Type").String()
+	// Safely get the Type string to avoid objptr errors
+	value_type := ""
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				value_type = ""
+			}
+		}()
+		typeVal := parent.Key("Type")
+		if !typeVal.IsNull() {
+			value_type = typeVal.String()
+		}
+	}()
+
 	if value_type == "/Pages" {
-		for i := 0; i < parent.Key("Kids").Len(); i++ {
-			kid := parent.Key("Kids").Index(i)
+		kids := parent.Key("Kids")
+		if kids.IsNull() {
+			return parent, errors.New("pages object has no kids")
+		}
+		for i := 0; i < kids.Len(); i++ {
+			kid := kids.Index(i)
 			recurse_parent, recurse_err := findFirstPage(kid)
 			if recurse_err == nil {
 				return recurse_parent, recurse_err

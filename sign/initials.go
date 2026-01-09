@@ -252,11 +252,24 @@ func (context *SignContext) fillInitialsFields() error {
 					kids := field.Key("Kids")
 					if !kids.IsNull() && kids.Len() > 0 {
 						firstKid := kids.Index(0)
-						if rectVal := firstKid.Key("Rect"); !rectVal.IsNull() && rectVal.Kind() == pdf.Array && rectVal.Len() >= 4 {
-							rect[0] = rectVal.Index(0).Float64()
-							rect[1] = rectVal.Index(1).Float64()
-							rect[2] = rectVal.Index(2).Float64()
-							rect[3] = rectVal.Index(3).Float64()
+						rectVal := firstKid.Key("Rect")
+						if !rectVal.IsNull() {
+							// Safely check if it's an array
+							var isArray bool
+							func() {
+								defer func() {
+									if r := recover(); r != nil {
+										isArray = false
+									}
+								}()
+								isArray = rectVal.Kind() == pdf.Array && rectVal.Len() >= 4
+							}()
+							if isArray {
+								rect[0] = rectVal.Index(0).Float64()
+								rect[1] = rectVal.Index(1).Float64()
+								rect[2] = rectVal.Index(2).Float64()
+								rect[3] = rectVal.Index(3).Float64()
+							}
 						}
 					}
 					da := normalizeDA(field.Key("DA").RawString())
@@ -344,11 +357,26 @@ func (context *SignContext) fillInitialsFields() error {
 					if kkey == "AP" {
 						// Generate new appearance stream for this widget
 						var rect [4]float64
-						if rectVal := kid.Key("Rect"); !rectVal.IsNull() && rectVal.Kind() == pdf.Array && rectVal.Len() >= 4 {
-							rect[0] = rectVal.Index(0).Float64()
-							rect[1] = rectVal.Index(1).Float64()
-							rect[2] = rectVal.Index(2).Float64()
-							rect[3] = rectVal.Index(3).Float64()
+						rectVal := kid.Key("Rect")
+						if !rectVal.IsNull() {
+							// Safely check if it's an array
+							var isArray bool
+							func() {
+								defer func() {
+									if r := recover(); r != nil {
+										isArray = false
+									}
+								}()
+								isArray = rectVal.Kind() == pdf.Array && rectVal.Len() >= 4
+							}()
+							if isArray {
+								rect[0] = rectVal.Index(0).Float64()
+								rect[1] = rectVal.Index(1).Float64()
+								rect[2] = rectVal.Index(2).Float64()
+								rect[3] = rectVal.Index(3).Float64()
+							} else {
+								rect = [4]float64{0, 0, 100, 20} // default size
+							}
 						} else {
 							rect = [4]float64{0, 0, 100, 20} // default size
 						}

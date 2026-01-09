@@ -134,7 +134,17 @@ func (context *SignContext) createIncPageUpdate(pageNumber, annot uint32) ([]byt
 		case "Contents":
 			// Special handling for Contents - must preserve stream structure
 			contentsValue := page.Key(key)
-			if contentsValue.Kind() == pdf.Array {
+			// Safely check if it's an array
+			var isArray bool
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						isArray = false
+					}
+				}()
+				isArray = contentsValue.Kind() == pdf.Array
+			}()
+			if isArray {
 				// If Contents is an array, keep it as an array reference
 				page_buffer.WriteString("  /Contents [")
 				for i := 0; i < contentsValue.Len(); i++ {
@@ -156,7 +166,25 @@ func (context *SignContext) createIncPageUpdate(pageNumber, annot uint32) ([]byt
 			page_buffer.WriteString(fmt.Sprintf("    %d 0 R\n", annot))
 			page_buffer.WriteString("  ]\n")
 		default:
-			page_buffer.WriteString(fmt.Sprintf("  /%s %s\n", key, page.Key(key).String()))
+			// Safely get string representation - check for pointer first to avoid objptr errors
+			val := page.Key(key)
+			if ptr := val.GetPtr(); ptr.GetID() != 0 {
+				// It's an indirect reference, write as reference
+				page_buffer.WriteString(fmt.Sprintf("  /%s %d %d R\n", key, ptr.GetID(), ptr.GetGen()))
+			} else {
+				// Try to get string representation safely
+				var strVal string
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							// If String() fails, try to serialize it
+							strVal = "null"
+						}
+					}()
+					strVal = val.String()
+				}()
+				page_buffer.WriteString(fmt.Sprintf("  /%s %s\n", key, strVal))
+			}
 		}
 	}
 
@@ -183,8 +211,26 @@ func findPageByNumber(pages pdf.Value, pageNumber uint32) (pdf.Value, error) {
 
 // Internal recursive helper that returns the found page and the remaining page number to find.
 func findPageByNumberRec(pages pdf.Value, pageNumber uint32) (pdf.Value, uint32, error) {
-	if pages.Key("Type").Name() == "Pages" {
+	// Safely get the Type name to avoid objptr errors
+	typeName := ""
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				typeName = ""
+			}
+		}()
+		typeVal := pages.Key("Type")
+		if !typeVal.IsNull() {
+			typeName = typeVal.Name()
+		}
+	}()
+
+	switch typeName {
+	case "Pages":
 		kids := pages.Key("Kids")
+		if kids.IsNull() {
+			return pdf.Value{}, pageNumber, fmt.Errorf("pages object has no kids")
+		}
 		for i := 0; i < kids.Len(); i++ {
 			page, remaining, err := findPageByNumberRec(kids.Index(i), pageNumber)
 			if err == nil && remaining == 0 {
@@ -193,11 +239,12 @@ func findPageByNumberRec(pages pdf.Value, pageNumber uint32) (pdf.Value, uint32,
 			pageNumber = remaining
 		}
 		return pdf.Value{}, pageNumber, fmt.Errorf("page number %d not found", pageNumber)
-	} else if pages.Key("Type").Name() == "Page" {
+	case "Page":
 		if pageNumber == 1 {
 			return pages, 0, nil
 		}
 		return pdf.Value{}, pageNumber - 1, nil
+	default:
+		return pdf.Value{}, pageNumber, fmt.Errorf("page number %d not found", pageNumber)
 	}
-	return pdf.Value{}, pageNumber, fmt.Errorf("page number %d not found", pageNumber)
 }
