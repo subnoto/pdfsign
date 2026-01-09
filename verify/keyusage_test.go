@@ -156,10 +156,7 @@ func TestValidateKeyUsage(t *testing.T) {
 			}
 
 			// Determine if this is a signing certificate
-			isSigningCert := true
-			if tt.name == "Parent certificate without Digital Signature KU (should be valid)" {
-				isSigningCert = false // This is a parent certificate
-			}
+			isSigningCert := tt.name != "Parent certificate without Digital Signature KU (should be valid)"
 
 			kuValid, kuError, ekuValid, ekuError := validateKeyUsage(cert, tt.options, isSigningCert)
 

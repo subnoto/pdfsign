@@ -127,17 +127,22 @@ func TestReaderCanReadPDF(t *testing.T) {
 	}
 }
 
-func TestSignPDF(t *testing.T) {
+func TestMain(m *testing.M) {
 	_ = os.RemoveAll("../testfiles/failed/")
 	_ = os.MkdirAll("../testfiles/failed/", 0o777)
+	_ = os.RemoveAll("../testfiles/success/")
+	_ = os.MkdirAll("../testfiles/success/", 0o777)
 
+	os.Exit(m.Run())
+}
+
+func testSignAllFiles(t *testing.T, baseSignData SignData) {
 	files, err := os.ReadDir("../testfiles/")
 	if err != nil {
 		t.Fatalf("%s", err.Error())
 	}
 
 	cert, pkey := loadCertificateAndKey(t)
-	certificateChains := [][]*x509.Certificate{}
 
 	for _, f := range files {
 		if filepath.Ext(f.Name()) != ".pdf" {
@@ -145,43 +150,82 @@ func TestSignPDF(t *testing.T) {
 		}
 
 		t.Run(f.Name(), func(st *testing.T) {
-			outputFile, err := os.CreateTemp("", fmt.Sprintf("%s_%s_", t.Name(), f.Name()))
+			ext := filepath.Ext(f.Name())
+			outputName := f.Name()[:len(f.Name())-len(ext)] + "_" + t.Name() + ext
+			var outputFile *os.File
+			var err error
+
+			if testing.Verbose() {
+				outputFile, err = os.Create(filepath.Join("../testfiles/success", outputName))
+			} else {
+				outputFile, err = os.CreateTemp("", fmt.Sprintf("%s_%s_", t.Name(), f.Name()))
+			}
+
 			if err != nil {
 				st.Fatalf("%s", err.Error())
 			}
+
 			defer func() {
-				if err := os.Remove(outputFile.Name()); err != nil {
-					st.Errorf("Failed to remove output file: %v", err)
+				if !testing.Verbose() {
+					_ = os.Remove(outputFile.Name())
 				}
 			}()
 
-			_, err = SignFile("../testfiles/"+f.Name(), outputFile.Name(), SignData{
-				Signature: SignDataSignature{
-					Info: SignDataSignatureInfo{
-						Name:        "John Doe",
-						Location:    "Somewhere",
-						Reason:      "Test",
-						ContactInfo: "None",
-						Date:        time.Now().Local(),
-					},
-					CertType:   CertificationSignature,
-					DocMDPPerm: AllowFillingExistingFormFieldsAndSignaturesPerms,
-				},
-				Signer:            pkey,
-				Certificate:       cert,
-				CertificateChains: certificateChains,
-				TSA: TSA{
-					URL: "http://timestamp.digicert.com",
-				},
-				RevocationData:     revocation.InfoArchival{},
-				RevocationFunction: DefaultEmbedRevocationStatusFunction,
-			})
+			signData := baseSignData
+			signData.Signer = pkey
+			signData.Certificate = cert
+
+			_, err = SignFile("../testfiles/"+f.Name(), outputFile.Name(), signData)
 			if err != nil {
 				st.Fatalf("%s: %s", f.Name(), err.Error())
 			}
-			verifySignedFile(st, outputFile, filepath.Base(f.Name()))
+			verifySignedFile(st, outputFile, outputName)
 		})
 	}
+}
+
+func TestSignPDF(t *testing.T) {
+	testSignAllFiles(t, SignData{
+		Signature: SignDataSignature{
+			Info: SignDataSignatureInfo{
+				Name:        "John Doe",
+				Location:    "Somewhere",
+				Reason:      "Test",
+				ContactInfo: "None",
+				Date:        time.Now().Local(),
+			},
+			CertType:   CertificationSignature,
+			DocMDPPerm: AllowFillingExistingFormFieldsAndSignaturesPerms,
+		},
+		TSA: TSA{
+			URL: "http://timestamp.digicert.com",
+		},
+		RevocationData:     revocation.InfoArchival{},
+		RevocationFunction: DefaultEmbedRevocationStatusFunction,
+	})
+}
+
+func TestSignPDFVisibleAll(t *testing.T) {
+	testSignAllFiles(t, SignData{
+		Signature: SignDataSignature{
+			Info: SignDataSignatureInfo{
+				Name:        "John Doe",
+				Location:    "Somewhere",
+				Reason:      "Visible Signature Test",
+				ContactInfo: "None",
+				Date:        time.Now().Local(),
+			},
+			CertType:   ApprovalSignature,
+			DocMDPPerm: AllowFillingExistingFormFieldsAndSignaturesPerms,
+		},
+		Appearance: Appearance{
+			Visible:     true,
+			LowerLeftX:  400,
+			LowerLeftY:  50,
+			UpperRightX: 600,
+			UpperRightY: 125,
+		},
+	})
 }
 
 func TestSignPDFFileUTF8(t *testing.T) {
