@@ -95,6 +95,25 @@ func (context *SignContext) createCatalog() ([]byte, error) {
 				continue
 			}
 
+			// Copy other AcroForm entries as-is, but handle DA specially.
+			// DA (Default Appearance) must be a string, not a dict.
+			if key == "DA" {
+				daValue := acro.Key("DA")
+				if daValue.Kind() == pdf.Dict {
+					// Invalid: DA should be a string, not a dict. Skip it.
+					continue
+				}
+				// Ensure DA is written as a string
+				_, _ = fmt.Fprintf(&catalog_buffer, "    /%s ", key)
+				if daValue.Kind() == pdf.String {
+					_, _ = fmt.Fprintf(&catalog_buffer, "(%s)", daValue.RawString())
+				} else {
+					context.serializeCatalogEntry(&catalog_buffer, rootPtr.GetID(), daValue)
+				}
+				catalog_buffer.WriteString("\n")
+				continue
+			}
+
 			// Copy other AcroForm entries as-is.
 			_, _ = fmt.Fprintf(&catalog_buffer, "    /%s ", key)
 			context.serializeCatalogEntry(&catalog_buffer, rootPtr.GetID(), acro.Key(key))
