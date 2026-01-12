@@ -219,10 +219,13 @@ func (context *SignContext) SignPDF() (*common.SignatureInfo, error) {
 		return nil, fmt.Errorf("failed to add visual signature object: %w", err)
 	}
 
-	// If configured, fill initials into matching AcroForm fields
+	// If configured, fill initials and date into matching AcroForm fields
 	if context.SignData.Appearance.SignerUID != "" {
 		if err := context.fillInitialsFields(); err != nil {
 			return nil, fmt.Errorf("failed to fill initials fields: %w", err)
+		}
+		if err := context.fillDateFields(); err != nil {
+			return nil, fmt.Errorf("failed to fill date fields: %w", err)
 		}
 	}
 
