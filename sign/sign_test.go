@@ -409,6 +409,184 @@ func TestSignPDFInitials(t *testing.T) {
 	}
 }
 
+func TestSignPDFDates(t *testing.T) {
+	cert, pkey := loadCertificateAndKey(t)
+
+	// Use a specific date for testing to ensure consistent results
+	testDate := time.Date(2024, 1, 15, 14, 30, 0, 0, time.FixedZone("EST", -5*3600)) // Jan 15, 2024 14:30 EST
+	expectedDateStr := "01/15/2024 14:30 -05:00"
+
+	// Test with testfile60.pdf - uses toto@toto.com
+	tests := []struct {
+		name string
+		uid  string
+	}{
+		{"testfile60", "toto@toto.com"},
+	}
+
+	inputFilePath := "../testfiles/testfile60.pdf"
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Check if test file exists
+			if _, err := os.Stat(inputFilePath); os.IsNotExist(err) {
+				t.Skipf("test file %s not available: %v", inputFilePath, err)
+				return
+			}
+
+			tmpfile, err := os.CreateTemp("", "sign_dates_")
+			if err != nil {
+				t.Fatalf("failed to create tmpfile: %v", err)
+			}
+			defer func() {
+				_ = os.Remove(tmpfile.Name())
+			}()
+
+			signInfo, err := SignFile(inputFilePath, tmpfile.Name(), SignData{
+				Signature: SignDataSignature{
+					Info: SignDataSignatureInfo{
+						Name: "Test Signer",
+						Date: testDate,
+					},
+					CertType:   CertificationSignature,
+					DocMDPPerm: AllowFillingExistingFormFieldsAndSignaturesPerms,
+				},
+				Signer:      pkey,
+				Certificate: cert,
+				Appearance: Appearance{
+					SignerUID: tc.uid,
+				},
+			})
+			if err != nil {
+				t.Fatalf("sign failed: %v", err)
+			}
+			// Verify the signature date was set correctly
+			if signInfo.SignatureTime == nil || signInfo.SignatureTime.IsZero() {
+				t.Fatalf("signature time was not set")
+			}
+
+			// Open signed file and verify AcroForm date fields were updated
+			sf, err := os.Open(tmpfile.Name())
+			if err != nil {
+				t.Fatalf("failed to open signed file: %v", err)
+			}
+			defer func() {
+				_ = sf.Close()
+			}()
+
+			sfi, err := sf.Stat()
+			if err != nil {
+				t.Fatalf("stat failed: %v", err)
+			}
+
+			rdr, err := pdf.NewReader(sf, sfi.Size())
+			if err != nil {
+				t.Fatalf("pdf reader failed: %v", err)
+			}
+
+			acro := rdr.Trailer().Key("Root").Key("AcroForm")
+			if acro.IsNull() {
+				t.Fatalf("signed PDF missing AcroForm")
+			}
+
+			fields := acro.Key("Fields")
+			if fields.IsNull() {
+				t.Fatalf("signed PDF AcroForm missing Fields")
+			}
+
+			// Try both plain UID and hex-encoded UID
+			uidVariants := []string{tc.uid}
+			hexUID := fmt.Sprintf("%x", tc.uid)
+			if hexUID != tc.uid {
+				uidVariants = append(uidVariants, hexUID)
+			}
+
+			found := false
+			for i := 0; i < fields.Len(); i++ {
+				field := fields.Index(i)
+				tVal := field.Key("T")
+				if tVal.IsNull() {
+					continue
+				}
+				fieldName := tVal.RawString()
+
+				// Decode UTF-16 field names just like fillDateFields does
+				decodedFieldName := fieldName
+				b := []byte(fieldName)
+				if len(b) >= 2 {
+					// BOM 0xFEFF = big endian, 0xFFFE = little endian
+					if b[0] == 0xfe && b[1] == 0xff {
+						// UTF-16 BE
+						var u16s []uint16
+						for i := 2; i+1 < len(b); i += 2 {
+							u16s = append(u16s, uint16(b[i])<<8|uint16(b[i+1]))
+						}
+						decodedFieldName = string(utf16.Decode(u16s))
+					} else if b[0] == 0xff && b[1] == 0xfe {
+						// UTF-16 LE
+						var u16s []uint16
+						for i := 2; i+1 < len(b); i += 2 {
+							u16s = append(u16s, uint16(b[i])|uint16(b[i+1])<<8)
+						}
+						decodedFieldName = string(utf16.Decode(u16s))
+					}
+				}
+
+				// Check if field name matches date_id pattern
+				if !strings.Contains(decodedFieldName, "date_id_") {
+					continue
+				}
+
+				// Check if field contains any of the UID variants
+				uidMatches := false
+				for _, uidVariant := range uidVariants {
+					if strings.Contains(decodedFieldName, uidVariant) {
+						uidMatches = true
+						break
+					}
+				}
+				if !uidMatches {
+					continue
+				}
+
+				vVal := field.Key("V")
+				if vVal.IsNull() {
+					continue
+				}
+				raw := vVal.RawString()
+				// Remove PDF string wrapping (parentheses) if present
+				raw = strings.Trim(raw, "()")
+
+				// Also check Kids widgets for the value
+				kids := field.Key("Kids")
+				if !kids.IsNull() {
+					for k := 0; k < kids.Len(); k++ {
+						kid := kids.Index(k)
+						kidV := kid.Key("V")
+						if !kidV.IsNull() {
+							kidRaw := kidV.RawString()
+							kidRaw = strings.Trim(kidRaw, "()")
+							if kidRaw != "" {
+								raw = kidRaw
+								break
+							}
+						}
+					}
+				}
+
+				// Check if the date string is present in the field value
+				if strings.Contains(raw, "01/15/2024") && strings.Contains(raw, "14:30") {
+					found = true
+					break
+				}
+			}
+
+			if !found {
+				t.Fatalf("Date field with expected value %q not found for uid %s", expectedDateStr, tc.uid)
+			}
+		})
+	}
+}
+
 func TestSignPDFVisible(t *testing.T) {
 	cert, pkey := loadCertificateAndKey(t)
 	inputFilePath := "../testfiles/testfile12.pdf"

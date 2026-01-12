@@ -5,41 +5,35 @@ import (
 	"time"
 )
 
-// formatDateString formats a time.Time as a PDF date string without PDF string wrapping
+// formatDateString formats a time.Time as MM/DD/YYYY hh:mm + timezone
 func formatDateString(date time.Time) string {
-	// Calculate timezone offset from GMT.
-	_, original_offset := date.Zone()
-	offset := original_offset
+	// Format date as MM/DD/YYYY
+	datePart := date.Format("01/02/2006")
+
+	// Format time as hh:mm (24-hour format)
+	timePart := date.Format("15:04")
+
+	// Calculate timezone offset
+	_, offset := date.Zone()
+
+	// Handle timezone offset calculation properly for both positive and negative offsets
+	var timezonePart string
 	if offset < 0 {
-		offset = -offset
-	}
-
-	offset_duration := time.Duration(offset) * time.Second
-	offset_hours := int(offset_duration.Hours())
-	offset_minutes := int(offset_duration.Minutes())
-	offset_minutes = offset_minutes - (offset_hours * 60)
-
-	dateString := "D:" + date.Format("20060102150405")
-
-	// Do some special formatting as the PDF timezone format isn't supported by Go.
-	if original_offset < 0 {
-		dateString += "-"
+		offsetHours := offset / 3600
+		offsetMinutes := (offset % 3600) / 60
+		// For negative offsets, modulo can be negative, so we need to handle it
+		if offsetMinutes < 0 {
+			offsetMinutes = -offsetMinutes
+		}
+		timezonePart = fmt.Sprintf("-%02d:%02d", -offsetHours, offsetMinutes)
 	} else {
-		dateString += "+"
+		offsetHours := offset / 3600
+		offsetMinutes := (offset % 3600) / 60
+		timezonePart = fmt.Sprintf("+%02d:%02d", offsetHours, offsetMinutes)
 	}
 
-	offset_hours_formatted := fmt.Sprintf("%d", offset_hours)
-	offset_minutes_formatted := fmt.Sprintf("%d", offset_minutes)
-	// Left pad to ensure 2 digits
-	if len(offset_hours_formatted) < 2 {
-		offset_hours_formatted = "0" + offset_hours_formatted
-	}
-	if len(offset_minutes_formatted) < 2 {
-		offset_minutes_formatted = "0" + offset_minutes_formatted
-	}
-	dateString += offset_hours_formatted + "'" + offset_minutes_formatted + "'"
+	return fmt.Sprintf("%s %s %s", datePart, timePart, timezonePart)
 
-	return dateString
 }
 
 // fillDateFields will search the AcroForm Fields array for fields with names
@@ -59,4 +53,3 @@ func (context *SignContext) fillDateFields() error {
 		return formatDateString(sigTime), nil
 	}, true) // makeReadOnly = true
 }
-

@@ -93,7 +93,7 @@ func (context *SignContext) createTextFieldAppearance(text string, rect [4]float
 	stream.WriteString(" Tf\n")                                     // Set font
 	stream.WriteString("0 0 0 rg\n")                                // Black text color
 	stream.WriteString(fmt.Sprintf("%.1f %.1f Td\n", textX, textY)) // Position
-				stream.WriteString(pdfString(text))                        // Text content
+	stream.WriteString(pdfString(text))                             // Text content
 	stream.WriteString(" Tj\n")                                     // Show text
 	stream.WriteString("ET\n")                                      // End text
 	stream.WriteString("Q\n")                                       // Restore graphics state
@@ -155,7 +155,20 @@ func matchFieldSigner(decodedFieldName, pattern, uid string) (bool, string) {
 	if len(matches) >= 3 {
 		fieldSigner = matches[2]
 	} else {
+		// Only use fallback if the pattern prefix matches (e.g., "initials_page_" or "date_id_")
+		// Extract the prefix from the pattern (everything before the first capture group)
+		prefixRe := regexp.MustCompile(`^([^\(]+)\(`)
+		prefixMatches := prefixRe.FindStringSubmatch(pattern)
+		if len(prefixMatches) >= 2 {
+			patternPrefix := prefixMatches[1]
+			// Check if field name starts with the pattern prefix
+			if !strings.HasPrefix(decodedFieldName, patternPrefix) {
+				return false, ""
+			}
+		}
+
 		// Fallback: try to find 'signer_' in the field name and extract a hex-like tail.
+		// Only use this if the pattern prefix matched above
 		if idx := strings.Index(decodedFieldName, "signer_"); idx >= 0 {
 			tail := decodedFieldName[idx+len("signer_"):]
 			// Extract hex substring from tail
@@ -425,4 +438,3 @@ func (context *SignContext) fillFormFields(pattern string, getValue func() (stri
 
 	return nil
 }
-
