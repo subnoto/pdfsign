@@ -1101,6 +1101,50 @@ func TestSignPDFWithWatermarkImagePNG(t *testing.T) {
 	verifySignedFile(t, tmpfile, originalFileName)
 }
 
+// TestOutputWatermarkPDFForVisualCheck signs a PDF with the transparent PNG
+// watermark and writes it to testfiles/signed-with-transparent-watermark.pdf
+// for manual visual verification. Run with: go test -run TestOutputWatermarkPDFForVisualCheck ./sign
+func TestOutputWatermarkPDFForVisualCheck(t *testing.T) {
+	cert, pkey := loadCertificateAndKey(t)
+	inputFilePath := "../testfiles/testfile12.pdf"
+	outputPath := "../testfiles/signed-with-transparent-watermark.pdf"
+
+	signatureImage, err := os.ReadFile("../testfiles/pdfsign-signature-watermark.png")
+	if err != nil {
+		t.Fatalf("Failed to read signature image: %s", err.Error())
+	}
+
+	_, err = SignFile(inputFilePath, outputPath, SignData{
+		Signature: SignDataSignature{
+			Info: SignDataSignatureInfo{
+				Name:        "James SuperSmith",
+				Location:    "Somewhere",
+				Reason:      "Visual check: transparent watermark",
+				ContactInfo: "None",
+				Date:        time.Now().Local(),
+			},
+			CertType:   ApprovalSignature,
+			DocMDPPerm: AllowFillingExistingFormFieldsAndSignaturesPerms,
+		},
+		Appearance: Appearance{
+			Visible:          true,
+			LowerLeftX:       400,
+			LowerLeftY:       50,
+			UpperRightX:      600,
+			UpperRightY:      125,
+			Image:            signatureImage,
+			ImageAsWatermark: true,
+		},
+		DigestAlgorithm: crypto.SHA512,
+		Signer:          pkey,
+		Certificate:     cert,
+	})
+	if err != nil {
+		t.Fatalf("sign failed: %s", err.Error())
+	}
+	t.Logf("Signed PDF written to %s (open to verify transparency and density)", outputPath)
+}
+
 // TestSignPDFAcroFormPreserved ensures signing a PDF with AcroForm does not
 // remove existing form fields; the signed PDF should have at least as many
 // AcroForm fields as the original (usually original + signature field).

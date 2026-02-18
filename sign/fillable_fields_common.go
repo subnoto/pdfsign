@@ -40,8 +40,9 @@ func normalizeDA(raw string) string {
 	return fmt.Sprintf("/F1 %s Tf 0 0 0 rg", size)
 }
 
-// createTextFieldAppearance creates an appearance stream for a text field
-func (context *SignContext) createTextFieldAppearance(text string, rect [4]float64, da string) ([]byte, error) {
+// createTextFieldAppearance creates an appearance stream for a text field.
+// fontScale is an optional multiplier for fontSize (e.g. 1.2 for date fields); 0 means no scaling.
+func (context *SignContext) createTextFieldAppearance(text string, rect [4]float64, da string, fontScale float64) ([]byte, error) {
 	width := rect[2] - rect[0]
 	height := rect[3] - rect[1]
 
@@ -62,6 +63,12 @@ func (context *SignContext) createTextFieldAppearance(text string, rect [4]float
 	maxFontSize := height * 0.7
 	if fontSize > maxFontSize {
 		fontSize = maxFontSize
+	}
+	if fontScale > 0 {
+		fontSize *= fontScale
+		if fontSize > maxFontSize {
+			fontSize = maxFontSize
+		}
 	}
 
 	// Better text width calculation (rough approximation for Helvetica)
@@ -216,8 +223,9 @@ func getFieldRect(field pdf.Value) [4]float64 {
 	return rect
 }
 
-// updateFieldObject updates a field object with a new value and optionally makes it read-only
-func (context *SignContext) updateFieldObject(field pdf.Value, value string, makeReadOnly bool) error {
+// updateFieldObject updates a field object with a new value and optionally makes it read-only.
+// appearanceFontScale is applied when building the appearance stream (0 = no scaling).
+func (context *SignContext) updateFieldObject(field pdf.Value, value string, makeReadOnly bool, appearanceFontScale float64) error {
 	ptr := field.GetPtr()
 	if ptr.GetID() == 0 {
 		// Direct object, skip parent update
@@ -244,7 +252,7 @@ func (context *SignContext) updateFieldObject(field pdf.Value, value string, mak
 				// Generate new appearance stream for this field
 				rect := getFieldRect(field)
 				da := normalizeDA(field.Key("DA").RawString())
-				appearance, err := context.createTextFieldAppearance(value, rect, da)
+				appearance, err := context.createTextFieldAppearance(value, rect, da, appearanceFontScale)
 				if err == nil {
 					apObjectId, err := context.addObject(appearance)
 					if err == nil {
@@ -337,7 +345,7 @@ func (context *SignContext) updateFieldObject(field pdf.Value, value string, mak
 						rect = [4]float64{0, 0, 100, 20} // default size
 					}
 					da := normalizeDA(kid.Key("DA").RawString())
-					appearance, err := context.createTextFieldAppearance(value, rect, da)
+					appearance, err := context.createTextFieldAppearance(value, rect, da, appearanceFontScale)
 					if err == nil {
 						apObjectId, err := context.addObject(appearance)
 						if err == nil {
@@ -391,8 +399,9 @@ func (context *SignContext) updateFieldObject(field pdf.Value, value string, mak
 	return nil
 }
 
-// fillFormFields is a generic function that fills form fields matching a pattern with a value
-func (context *SignContext) fillFormFields(pattern string, getValue func() (string, error), makeReadOnly bool) error {
+// fillFormFields is a generic function that fills form fields matching a pattern with a value.
+// appearanceFontScale is applied when building field appearance (0 = no scaling, e.g. 1.2 for date fields).
+func (context *SignContext) fillFormFields(pattern string, getValue func() (string, error), makeReadOnly bool, appearanceFontScale float64) error {
 	uid := context.SignData.Appearance.SignerUID
 	if uid == "" {
 		return nil
@@ -431,7 +440,7 @@ func (context *SignContext) fillFormFields(pattern string, getValue func() (stri
 			continue
 		}
 
-		if err := context.updateFieldObject(field, value, makeReadOnly); err != nil {
+		if err := context.updateFieldObject(field, value, makeReadOnly, appearanceFontScale); err != nil {
 			return err
 		}
 	}

@@ -56,6 +56,14 @@ type Appearance struct {
 	//   initials_page_${pageIndex}_signer_${signer_uid}
 	// The initials are derived from SignData.Signature.Info.Name.
 	SignerUID string
+
+	// DateFormat is the Go time layout for the date+time part of filled date fields
+	// (reference time: Mon Jan 2 15:04:05 MST 2006). When non-empty, used for date_id_* fields;
+	// timezone is still appended. When empty, Locale is used if set, else default US layout.
+	DateFormat string
+	// Locale is a BCP 47-style tag (e.g. "en-US", "fr-FR", "de-DE"). Used only when DateFormat
+	// is empty to pick a predefined date layout so the filled date respects the locale format.
+	Locale string
 }
 
 type VisualSignData struct {

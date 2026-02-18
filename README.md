@@ -104,33 +104,34 @@ A PDF signing and verification library written in [Go](https://go.dev). This lib
 
 The verification command outputs JSON with the following key fields:
 
-| Field | Description |
-|-------|-------------|
-| `ValidSignature` | Whether the cryptographic signature is mathematically valid |
-| `TrustedIssuer` | Whether the certificate chain is trusted by system root certificates |
-| `RevokedCertificate` | Whether any certificate in the chain has been revoked before signing |
-| `KeyUsageValid` | Whether the certificate has appropriate key usage for PDF signing |
-| `ExtKeyUsageValid` | Whether the certificate has proper Extended Key Usage (EKU) values |
-| `TimestampStatus` | Status of embedded timestamp: "valid", "invalid", or "missing" |
-| `TimestampTrusted` | Whether the timestamp token's certificate chain is trusted |
-| `VerificationTime` | The time used for certificate validation |
-| `TimeSource` | Source of verification time: "embedded_timestamp", "signature_time", or "current_time" |
-| `TimeWarnings` | Warnings about time validation (e.g., using untrusted signature time) |
-| `OCSPEmbedded` | Whether OCSP response is embedded in the PDF |
-| `OCSPExternal` | Whether external OCSP checking succeeded and returned a valid response |
-| `OCSPExternalChecked` | Whether external OCSP check was attempted (always true if external checking enabled and certificate has OCSP URLs) |
-| `OCSPExternalValid` | Whether external OCSP check succeeded and returned a valid response |
-| `OCSPExternalWarning` | Warning message if external OCSP check failed or was not attempted |
-| `CRLEmbedded` | Whether CRL is embedded in the PDF |
-| `CRLExternal` | Whether external CRL checking succeeded and returned a valid CRL |
-| `CRLExternalChecked` | Whether external CRL check was attempted (always true if external checking enabled and certificate has CRL URLs) |
-| `CRLExternalValid` | Whether external CRL check succeeded and returned a valid CRL |
-| `CRLExternalWarning` | Warning message if external CRL check failed or was not attempted |
-| `RevocationTime` | When the certificate was revoked (if applicable) |
-| `RevokedBeforeSigning` | Whether revocation occurred before the signing time |
-| `RevocationWarning` | Human-readable warning about revocation status checking |
+| Field                  | Description                                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `ValidSignature`       | Whether the cryptographic signature is mathematically valid                                                        |
+| `TrustedIssuer`        | Whether the certificate chain is trusted by system root certificates                                               |
+| `RevokedCertificate`   | Whether any certificate in the chain has been revoked before signing                                               |
+| `KeyUsageValid`        | Whether the certificate has appropriate key usage for PDF signing                                                  |
+| `ExtKeyUsageValid`     | Whether the certificate has proper Extended Key Usage (EKU) values                                                 |
+| `TimestampStatus`      | Status of embedded timestamp: "valid", "invalid", or "missing"                                                     |
+| `TimestampTrusted`     | Whether the timestamp token's certificate chain is trusted                                                         |
+| `VerificationTime`     | The time used for certificate validation                                                                           |
+| `TimeSource`           | Source of verification time: "embedded_timestamp", "signature_time", or "current_time"                             |
+| `TimeWarnings`         | Warnings about time validation (e.g., using untrusted signature time)                                              |
+| `OCSPEmbedded`         | Whether OCSP response is embedded in the PDF                                                                       |
+| `OCSPExternal`         | Whether external OCSP checking succeeded and returned a valid response                                             |
+| `OCSPExternalChecked`  | Whether external OCSP check was attempted (always true if external checking enabled and certificate has OCSP URLs) |
+| `OCSPExternalValid`    | Whether external OCSP check succeeded and returned a valid response                                                |
+| `OCSPExternalWarning`  | Warning message if external OCSP check failed or was not attempted                                                 |
+| `CRLEmbedded`          | Whether CRL is embedded in the PDF                                                                                 |
+| `CRLExternal`          | Whether external CRL checking succeeded and returned a valid CRL                                                   |
+| `CRLExternalChecked`   | Whether external CRL check was attempted (always true if external checking enabled and certificate has CRL URLs)   |
+| `CRLExternalValid`     | Whether external CRL check succeeded and returned a valid CRL                                                      |
+| `CRLExternalWarning`   | Warning message if external CRL check failed or was not attempted                                                  |
+| `RevocationTime`       | When the certificate was revoked (if applicable)                                                                   |
+| `RevokedBeforeSigning` | Whether revocation occurred before the signing time                                                                |
+| `RevocationWarning`    | Human-readable warning about revocation status checking                                                            |
 
 **External Revocation Checking Results**: The external revocation checking now provides structured results with clear booleans and warnings for each category (trusted issuer, OCSP, CRL) independently. This makes it crystal clear what is working and what is not:
+
 - `*ExternalChecked` indicates whether a check was attempted
 - `*ExternalValid` indicates whether the check succeeded
 - `*ExternalWarning` provides details when a check fails or cannot be performed
@@ -252,13 +253,13 @@ func main() {
     // Optional: Configure proxy support
     // Option 1: Use environment variables (HTTP_PROXY, HTTPS_PROXY, NO_PROXY)
     // The library will automatically use these if ProxyURL is not set
-    
+
     // Option 2: Set explicit proxy URL
     proxyURL, err := url.Parse("http://proxy.example.com:3128")
     if err == nil {
         options.ProxyURL = proxyURL
     }
-    
+
     // Option 3: Custom HTTP client with proxy support
     // options.HTTPClient = &http.Client{
     //     Timeout: 20 * time.Second,
@@ -307,17 +308,17 @@ func main() {
 
 ### Library Verification Options
 
-| Option                          | Type            | Default | Description                                                                                    |
-| ------------------------------- | --------------- | ------- | ---------------------------------------------------------------------------------------------- |
-| `EnableExternalRevocationCheck` | bool            | `false` | Perform OCSP and CRL checks via network requests                                               |
-| `HTTPClient`                    | `*http.Client`  | `nil`   | Custom HTTP client for external checks (proxy support)                                         |
-| `HTTPTimeout`                   | `time.Duration` | `10s`   | Timeout for external revocation checking requests                                              |
+| Option                          | Type            | Default | Description                                                                                     |
+| ------------------------------- | --------------- | ------- | ----------------------------------------------------------------------------------------------- |
+| `EnableExternalRevocationCheck` | bool            | `false` | Perform OCSP and CRL checks via network requests                                                |
+| `HTTPClient`                    | `*http.Client`  | `nil`   | Custom HTTP client for external checks (proxy support)                                          |
+| `HTTPTimeout`                   | `time.Duration` | `10s`   | Timeout for external revocation checking requests                                               |
 | `ProxyURL`                      | `*url.URL`      | `nil`   | Explicit proxy URL for HTTP requests. If nil, uses HTTP_PROXY/HTTPS_PROXY environment variables |
-| `RequireDigitalSignatureKU`     | bool            | `true`  | Require Digital Signature key usage in certificates                                            |
-| `AllowNonRepudiationKU`         | bool            | `true`  | Allow Non-Repudiation key usage (recommended for PDF signing)                                  |
-| `TrustSignatureTime`            | bool            | `false` | Trust the signature time embedded in the PDF if no timestamp is present (untrusted by default) |
-| `ValidateTimestampCertificates` | bool            | `true`  | Validate timestamp token's certificate chain and revocation status                             |
-| `AllowUntrustedRoots`           | bool            | `false` | Allow certificates embedded in the PDF to be used as trusted roots (use with caution)          |
+| `RequireDigitalSignatureKU`     | bool            | `true`  | Require Digital Signature key usage in certificates                                             |
+| `AllowNonRepudiationKU`         | bool            | `true`  | Allow Non-Repudiation key usage (recommended for PDF signing)                                   |
+| `TrustSignatureTime`            | bool            | `false` | Trust the signature time embedded in the PDF if no timestamp is present (untrusted by default)  |
+| `ValidateTimestampCertificates` | bool            | `true`  | Validate timestamp token's certificate chain and revocation status                              |
+| `AllowUntrustedRoots`           | bool            | `false` | Allow certificates embedded in the PDF to be used as trusted roots (use with caution)           |
 
 ## Signature Appearance with Images
 
@@ -325,10 +326,10 @@ Add visible signatures with custom images to your PDF documents.
 
 ### Supported Features
 
--   **Image formats**: JPG and PNG
--   **Transparency**: PNG alpha channel support
--   **Positioning**: Precise coordinate control
--   **Scaling**: Automatic aspect ratio preservation
+- **Image formats**: JPG and PNG
+- **Transparency**: PNG alpha channel support
+- **Positioning**: Precise coordinate control
+- **Scaling**: Automatic aspect ratio preservation
 
 ### Usage Example
 
@@ -358,12 +359,33 @@ err = sign.Sign(inputFile, outputFile, rdr, size, sign.SignData{
         UpperRightY: 125,
         Image:       signatureImage,
         // ImageAsWatermark: true, // Optional: draw text over image
+        // SignerUID: "user@example.com",     // Optional: fill AcroForm initials/date fields
+        // DateFormat: "02.01.2006 15:04",      // Optional: Go time layout for date fields
+        // Locale: "fr-FR",                     // Optional: locale for date when DateFormat empty
     },
     DigestAlgorithm: crypto.SHA512,
     Signer:          privateKey,
     Certificate:     certificate,
 })
 ```
+
+### Fillable form fields and date format (subnoto fork)
+
+When the PDF contains AcroForm text fields whose names follow specific patterns, the signer’s **initials** and **signature date** can be filled automatically.
+
+- Set **`Appearance.SignerUID`** to a value that identifies the signer (e.g. email). It is matched against the field names; support for both plain and hex-encoded UIDs is available.
+- Field naming patterns:
+    - **Initials**: `initials_page_${pageIndex}_signer_${signer_uid}`
+    - **Date**: `date_id_${id}_signer_${signer_uid}`
+
+The **date** is formatted with the signature time (date, time, and timezone). You can control the format in two ways:
+
+| Field            | Description                                                                                                                                                                                                          |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`DateFormat`** | Optional. [Go time layout](https://pkg.go.dev/time#Time.Format) for the date+time part (e.g. `"02.01.2006 15:04"`). Timezone is always appended; UTC is shown as **GMT** (not `+00:00`).                             |
+| **`Locale`**     | Optional. BCP 47-style tag (e.g. `"en-US"`, `"fr-FR"`, `"de-DE"`). Used only when `DateFormat` is empty; picks a predefined layout for that locale. When both are empty, the default is US-style `01/02/2006 15:04`. |
+
+Date fields are rendered with a slightly larger font than other filled text fields for readability.
 
 ## Limitations
 
@@ -373,9 +395,9 @@ err = sign.Sign(inputFile, outputFile, rdr, size, sign.SignData{
 
 **Impact on Revocation Checking**:
 
--   OCSP responders and CRL distribution points that use SHA1 signatures will fail verification
--   External revocation checking (`-external` flag or `EnableExternalRevocationCheck` option) may fail for certificates signed with SHA1
--   Legacy PKI infrastructure still using SHA1 may not be compatible with this library
+- OCSP responders and CRL distribution points that use SHA1 signatures will fail verification
+- External revocation checking (`-external` flag or `EnableExternalRevocationCheck` option) may fail for certificates signed with SHA1
+- Legacy PKI infrastructure still using SHA1 may not be compatible with this library
 
 **Recommendation**: Use certificates and PKI infrastructure that support modern hash algorithms (SHA-256 or higher).
 
