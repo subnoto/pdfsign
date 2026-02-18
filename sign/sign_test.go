@@ -585,6 +585,116 @@ func TestSignPDFDates(t *testing.T) {
 			}
 		})
 	}
+
+	// Subtest: UTC timezone must be displayed as "UTC" (not GMT)
+	t.Run("UTC_timezone", func(t *testing.T) {
+		if _, err := os.Stat(inputFilePath); os.IsNotExist(err) {
+			t.Skipf("test file %s not available: %v", inputFilePath, err)
+			return
+		}
+		tmpfile, err := os.CreateTemp("", "sign_dates_utc_")
+		if err != nil {
+			t.Fatalf("failed to create tmpfile: %v", err)
+		}
+		defer func() { _ = os.Remove(tmpfile.Name()) }()
+
+		utcDate := time.Date(2024, 1, 15, 14, 30, 0, 0, time.UTC)
+		_, err = SignFile(inputFilePath, tmpfile.Name(), SignData{
+			Signature: SignDataSignature{
+				Info: SignDataSignatureInfo{
+					Name: "Test Signer",
+					Date: utcDate,
+				},
+				CertType:   CertificationSignature,
+				DocMDPPerm: AllowFillingExistingFormFieldsAndSignaturesPerms,
+			},
+			Signer:      pkey,
+			Certificate: cert,
+			Appearance:  Appearance{SignerUID: "toto@toto.com"},
+		})
+		if err != nil {
+			t.Fatalf("sign failed: %v", err)
+		}
+
+		sf, err := os.Open(tmpfile.Name())
+		if err != nil {
+			t.Fatalf("failed to open signed file: %v", err)
+		}
+		defer func() { _ = sf.Close() }()
+		sfi, _ := sf.Stat()
+		rdr, err := pdf.NewReader(sf, sfi.Size())
+		if err != nil {
+			t.Fatalf("pdf reader failed: %v", err)
+		}
+		fields := rdr.Trailer().Key("Root").Key("AcroForm").Key("Fields")
+		if fields.IsNull() {
+			t.Fatalf("signed PDF AcroForm missing Fields")
+		}
+
+		for i := 0; i < fields.Len(); i++ {
+			field := fields.Index(i)
+			tVal := field.Key("T")
+			if tVal.IsNull() {
+				continue
+			}
+			fieldName := tVal.RawString()
+			decodedFieldName := fieldName
+			b := []byte(fieldName)
+			if len(b) >= 2 {
+				if b[0] == 0xfe && b[1] == 0xff {
+					var u16s []uint16
+					for j := 2; j+1 < len(b); j += 2 {
+						u16s = append(u16s, uint16(b[j])<<8|uint16(b[j+1]))
+					}
+					decodedFieldName = string(utf16.Decode(u16s))
+				} else if b[0] == 0xff && b[1] == 0xfe {
+					var u16s []uint16
+					for j := 2; j+1 < len(b); j += 2 {
+						u16s = append(u16s, uint16(b[j])|uint16(b[j+1])<<8)
+					}
+					decodedFieldName = string(utf16.Decode(u16s))
+				}
+			}
+			if !strings.Contains(decodedFieldName, "date_id_") {
+				continue
+			}
+			uidVariants := []string{"toto@toto.com", fmt.Sprintf("%x", "toto@toto.com")}
+			uidMatches := false
+			for _, uidVariant := range uidVariants {
+				if strings.Contains(decodedFieldName, uidVariant) {
+					uidMatches = true
+					break
+				}
+			}
+			if !uidMatches {
+				continue
+			}
+			vVal := field.Key("V")
+			if vVal.IsNull() {
+				continue
+			}
+			raw := strings.Trim(vVal.RawString(), "()")
+			// Also check Kids widgets for the value (same as main test)
+			kids := field.Key("Kids")
+			if !kids.IsNull() {
+				for k := 0; k < kids.Len(); k++ {
+					kid := kids.Index(k)
+					kidV := kid.Key("V")
+					if !kidV.IsNull() {
+						kidRaw := strings.Trim(kidV.RawString(), "()")
+						if kidRaw != "" {
+							raw = kidRaw
+							break
+						}
+					}
+				}
+			}
+			if strings.Contains(raw, "01/15/2024") && strings.Contains(raw, "14:30") && strings.Contains(raw, "UTC") {
+				return // found expected UTC date string
+			}
+		}
+		t.Fatalf("Date field with UTC timezone not found: expected value to contain 01/15/2024, 14:30 and UTC")
+	})
 }
 
 func TestSignPDFVisible(t *testing.T) {
