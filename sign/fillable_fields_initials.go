@@ -30,6 +30,6 @@ func (context *SignContext) fillInitialsFields() error {
 	pattern := `initials_page_(\d+)_signer_(.+)`
 	return context.fillFormFields(pattern, func() (string, error) {
 		return initials, nil
-	}, true) // makeReadOnly = true
+	}, true, 0) // makeReadOnly = true, no font scale for initials
 }
 

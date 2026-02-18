@@ -64,6 +64,34 @@ func writeAppearanceStreamBuffer(buffer *bytes.Buffer, stream []byte) {
 	buffer.WriteString("\nendstream\n")
 }
 
+// unpremultiply converts premultiplied RGBA (0-65535) to non-premultiplied 8-bit.
+// Go's RGBA() returns premultiplied values; PDF soft masks expect non-premultiplied RGB.
+// When a is 0, returns (0,0,0,0) since the color is irrelevant for transparent pixels.
+func unpremultiply(r, g, b, a uint32) (r8, g8, b8, a8 byte) {
+	a8 = byte(a >> 8)
+	if a8 == 0 {
+		return 0, 0, 0, 0
+	}
+	a32 := uint32(a8)
+	r32 := uint32(r >> 8)
+	g32 := uint32(g >> 8)
+	b32 := uint32(b >> 8)
+	// R = (r * 255) / a, clamped to 255
+	rOut := (r32 * 255) / a32
+	if rOut > 255 {
+		rOut = 255
+	}
+	gOut := (g32 * 255) / a32
+	if gOut > 255 {
+		gOut = 255
+	}
+	bOut := (b32 * 255) / a32
+	if bOut > 255 {
+		bOut = 255
+	}
+	return byte(rOut), byte(gOut), byte(bOut), a8
+}
+
 func (context *SignContext) createImageXObject() ([]byte, []byte, error) {
 	imageData := context.SignData.Appearance.Image
 
@@ -101,20 +129,29 @@ func (context *SignContext) createImageXObject() ([]byte, []byte, error) {
 	case "png":
 		imageObject.WriteString("  /Filter /FlateDecode\n")
 
-		// Extract RGB and alpha values from each pixel
-		for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-			for x := bounds.Min.X; x < bounds.Max.X; x++ {
-				// Get the color at pixel (x,y)
-				originalColor := img.At(x, y)
-
-				// Extract RGBA values (ranges from 0-65535 in Go's color model)
-				r, g, b, a := originalColor.RGBA()
-
-				// Convert to 8-bit (0-255)
-				rgbData.WriteByte(byte(r >> 8))
-				rgbData.WriteByte(byte(g >> 8))
-				rgbData.WriteByte(byte(b >> 8))
-				alphaData.WriteByte(byte(a >> 8))
+		// Extract RGB and alpha; store non-premultiplied RGB for PDF soft mask (avoids black fringe and washed density).
+		if nrgba, ok := img.(*image.NRGBA); ok {
+			// NRGBA stores non-premultiplied values; use directly.
+			for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+				for x := bounds.Min.X; x < bounds.Max.X; x++ {
+					i := nrgba.PixOffset(x, y)
+					rgbData.WriteByte(nrgba.Pix[i])
+					rgbData.WriteByte(nrgba.Pix[i+1])
+					rgbData.WriteByte(nrgba.Pix[i+2])
+					alphaData.WriteByte(nrgba.Pix[i+3])
+				}
+			}
+		} else {
+			// RGBA() returns premultiplied values; un-premultiply before writing.
+			for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+				for x := bounds.Min.X; x < bounds.Max.X; x++ {
+					r, g, b, a := img.At(x, y).RGBA()
+					r8, g8, b8, a8 := unpremultiply(r, g, b, a)
+					rgbData.WriteByte(r8)
+					rgbData.WriteByte(g8)
+					rgbData.WriteByte(b8)
+					alphaData.WriteByte(a8)
+				}
 			}
 		}
 
