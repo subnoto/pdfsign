@@ -92,6 +92,38 @@ func unpremultiply(r, g, b, a uint32) (r8, g8, b8, a8 byte) {
 	return byte(rOut), byte(gOut), byte(bOut), a8
 }
 
+// writeU16BE writes v as 16-bit big-endian (PDF convention) into b.
+func writeU16BE(b *bytes.Buffer, v uint16) {
+	b.WriteByte(byte(v >> 8))
+	b.WriteByte(byte(v))
+}
+
+// unpremultiply64 converts premultiplied RGBA64 to non-premultiplied 16-bit.
+// When a is 0, returns (0,0,0,0).
+func unpremultiply64(r, g, b, a uint32) (r16, g16, b16, a16 uint16) {
+	if a == 0 {
+		return 0, 0, 0, 0
+	}
+	a64 := uint64(a)
+	r64 := uint64(r)
+	g64 := uint64(g)
+	b64 := uint64(b)
+	// R = (r * 65535) / a, clamp to 65535
+	rOut := (r64 * 65535) / a64
+	if rOut > 65535 {
+		rOut = 65535
+	}
+	gOut := (g64 * 65535) / a64
+	if gOut > 65535 {
+		gOut = 65535
+	}
+	bOut := (b64 * 65535) / a64
+	if bOut > 65535 {
+		bOut = 65535
+	}
+	return uint16(rOut), uint16(gOut), uint16(bOut), uint16(a)
+}
+
 func (context *SignContext) createImageXObject() ([]byte, []byte, error) {
 	imageData := context.SignData.Appearance.Image
 
@@ -116,32 +148,63 @@ func (context *SignContext) createImageXObject() ([]byte, []byte, error) {
 	imageObject.WriteString(fmt.Sprintf("  /Width %d\n", width))
 	imageObject.WriteString(fmt.Sprintf("  /Height %d\n", height))
 	imageObject.WriteString("  /ColorSpace /DeviceRGB\n")
-	imageObject.WriteString("  /BitsPerComponent 8\n")
+	imageObject.WriteString("  /Interpolate true\n") // Hint viewers to smooth when scaling
 
 	var rgbData = new(bytes.Buffer)
 	var alphaData = new(bytes.Buffer)
+	var bitsPerComponent = 8
 
 	// Handle different formats
 	switch format {
 	case "jpeg":
-		imageObject.WriteString("  /Filter [/FlateDecode/DCTDecode]\n")
+		imageObject.WriteString("  /BitsPerComponent 8\n")
+		// Embed JPEG as-is (DCTDecode only); avoid Flate to preserve quality and compatibility.
+		imageObject.WriteString("  /Filter /DCTDecode\n")
 		rgbData = bytes.NewBuffer(imageData) // JPEG data is already in the correct format
 	case "png":
 		imageObject.WriteString("  /Filter /FlateDecode\n")
 
-		// Extract RGB and alpha; store non-premultiplied RGB for PDF soft mask (avoids black fringe and washed density).
-		if nrgba, ok := img.(*image.NRGBA); ok {
-			// NRGBA stores non-premultiplied values; use directly.
+		// Extract RGB and alpha; store non-premultiplied for PDF soft mask. Prefer 16-bit when available for full quality.
+		switch src := img.(type) {
+		case *image.NRGBA64:
+			bitsPerComponent = 16
 			for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 				for x := bounds.Min.X; x < bounds.Max.X; x++ {
-					i := nrgba.PixOffset(x, y)
-					rgbData.WriteByte(nrgba.Pix[i])
-					rgbData.WriteByte(nrgba.Pix[i+1])
-					rgbData.WriteByte(nrgba.Pix[i+2])
-					alphaData.WriteByte(nrgba.Pix[i+3])
+					i := src.PixOffset(x, y)
+					// Pix is little-endian (low, high) per component; PDF expects big-endian.
+					rgbData.WriteByte(src.Pix[i+1])
+					rgbData.WriteByte(src.Pix[i])
+					rgbData.WriteByte(src.Pix[i+3])
+					rgbData.WriteByte(src.Pix[i+2])
+					rgbData.WriteByte(src.Pix[i+5])
+					rgbData.WriteByte(src.Pix[i+4])
+					alphaData.WriteByte(src.Pix[i+7])
+					alphaData.WriteByte(src.Pix[i+6])
 				}
 			}
-		} else {
+		case *image.RGBA64:
+			bitsPerComponent = 16
+			for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+				for x := bounds.Min.X; x < bounds.Max.X; x++ {
+					r, g, b, a := src.RGBA64At(x, y).RGBA()
+					r16, g16, b16, a16 := unpremultiply64(r, g, b, a)
+					writeU16BE(rgbData, r16)
+					writeU16BE(rgbData, g16)
+					writeU16BE(rgbData, b16)
+					writeU16BE(alphaData, a16)
+				}
+			}
+		case *image.NRGBA:
+			for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+				for x := bounds.Min.X; x < bounds.Max.X; x++ {
+					i := src.PixOffset(x, y)
+					rgbData.WriteByte(src.Pix[i])
+					rgbData.WriteByte(src.Pix[i+1])
+					rgbData.WriteByte(src.Pix[i+2])
+					alphaData.WriteByte(src.Pix[i+3])
+				}
+			}
+		default:
 			// RGBA() returns premultiplied values; un-premultiply before writing.
 			for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 				for x := bounds.Min.X; x < bounds.Max.X; x++ {
@@ -155,12 +218,14 @@ func (context *SignContext) createImageXObject() ([]byte, []byte, error) {
 			}
 		}
 
+		imageObject.WriteString(fmt.Sprintf("  /BitsPerComponent %d\n", bitsPerComponent))
+
 		// If image has alpha channel, create soft mask
 		if hasAlpha(img) {
 			compressedAlphaData := compressData(alphaData.Bytes())
 
-			// Create and add the soft mask object
-			maskObjectBytes, err = context.createAlphaMask(width, height, compressedAlphaData)
+			// Create and add the soft mask object (same bit depth as image for quality)
+			maskObjectBytes, err = context.createAlphaMask(width, height, compressedAlphaData, bitsPerComponent)
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to create alpha mask: %w", err)
 			}
@@ -171,12 +236,20 @@ func (context *SignContext) createImageXObject() ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("unsupported image format: %s", format)
 	}
 
-	compressedRgbData := compressData(rgbData.Bytes())
+	var streamPayload []byte
+	switch format {
+	case "jpeg":
+		streamPayload = rgbData.Bytes() // Already JPEG bytes; no extra compression
+	case "png":
+		streamPayload = compressData(rgbData.Bytes())
+	default:
+		streamPayload = compressData(rgbData.Bytes())
+	}
 
-	imageObject.WriteString(fmt.Sprintf("  /Length %d\n", len(compressedRgbData)))
+	imageObject.WriteString(fmt.Sprintf("  /Length %d\n", len(streamPayload)))
 	imageObject.WriteString(">>\n")
 	imageObject.WriteString("stream\n")
-	imageObject.Write(compressedRgbData)
+	imageObject.Write(streamPayload)
 	imageObject.WriteString("\nendstream\n")
 
 	return imageObject.Bytes(), maskObjectBytes, nil
@@ -198,7 +271,7 @@ func compressData(data []byte) []byte {
 	return compressedData.Bytes()
 }
 
-func (context *SignContext) createAlphaMask(width, height int, alphaData []byte) ([]byte, error) {
+func (context *SignContext) createAlphaMask(width, height int, compressedAlphaData []byte, bitsPerComponent int) ([]byte, error) {
 	var maskObject bytes.Buffer
 
 	maskObject.WriteString("<<\n")
@@ -207,12 +280,13 @@ func (context *SignContext) createAlphaMask(width, height int, alphaData []byte)
 	maskObject.WriteString(fmt.Sprintf("  /Width %d\n", width))
 	maskObject.WriteString(fmt.Sprintf("  /Height %d\n", height))
 	maskObject.WriteString("  /ColorSpace /DeviceGray\n")
-	maskObject.WriteString("  /BitsPerComponent 8\n")
+	maskObject.WriteString(fmt.Sprintf("  /BitsPerComponent %d\n", bitsPerComponent))
+	maskObject.WriteString("  /Interpolate true\n")
 	maskObject.WriteString("  /Filter /FlateDecode\n")
-	maskObject.WriteString(fmt.Sprintf("  /Length %d\n", len(alphaData)))
+	maskObject.WriteString(fmt.Sprintf("  /Length %d\n", len(compressedAlphaData)))
 	maskObject.WriteString(">>\n")
 	maskObject.WriteString("stream\n")
-	maskObject.Write(alphaData)
+	maskObject.Write(compressedAlphaData)
 	maskObject.WriteString("\nendstream\n")
 
 	return maskObject.Bytes(), nil
@@ -221,7 +295,7 @@ func (context *SignContext) createAlphaMask(width, height int, alphaData []byte)
 // hasAlpha checks if the image has an alpha channel
 func hasAlpha(img image.Image) bool {
 	switch img.(type) {
-	case *image.NRGBA, *image.RGBA:
+	case *image.NRGBA, *image.RGBA, *image.NRGBA64, *image.RGBA64:
 		return true
 	default:
 		return false
