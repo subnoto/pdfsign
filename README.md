@@ -382,7 +382,7 @@ The **date** is formatted with the signature time (date, time, and timezone). Yo
 
 | Field            | Description                                                                                                                                                                                                          |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`DateFormat`** | Optional. [Go time layout](https://pkg.go.dev/time#Time.Format) for the date+time part (e.g. `"02.01.2006 15:04"`). Timezone is always appended; UTC is shown as **GMT** (not `+00:00`).                             |
+| **`DateFormat`** | Optional. [Go time layout](https://pkg.go.dev/time#Time.Format) for the date+time part (e.g. `"02.01.2006 15:04"`). Timezone is always appended; UTC is shown as **UTC** (not `+00:00`).                             |
 | **`Locale`**     | Optional. BCP 47-style tag (e.g. `"en-US"`, `"fr-FR"`, `"de-DE"`). Used only when `DateFormat` is empty; picks a predefined layout for that locale. When both are empty, the default is US-style `01/02/2006 15:04`. |
 
 Date fields are rendered with a slightly larger font than other filled text fields for readability.

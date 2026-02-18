@@ -51,7 +51,7 @@ func formatDateString(date time.Time, layout string) string {
 	_, offset := date.Zone()
 	var timezonePart string
 	if offset == 0 {
-		timezonePart = "GMT"
+		timezonePart = "UTC"
 	} else if offset < 0 {
 		offsetHours := offset / 3600
 		offsetMinutes := (offset % 3600) / 60
