@@ -57,6 +57,16 @@ func Sign(input io.ReadSeeker, output io.Writer, rdr *pdf.Reader, size int64, si
 		SignatureMaxLengthBase: uint32(hex.EncodedLen(512)),
 	}
 
+	// Initialize encryption context if the PDF is encrypted.
+	// New stream objects must be encrypted with the same key.
+	if key := rdr.EncryptionKey(); key != nil {
+		context.encryption = &EncryptionContext{
+			Key:        key,
+			UseAES:     rdr.UseAES(),
+			EncVersion: rdr.EncVersion(),
+		}
+	}
+
 	// Fetch existing signatures
 	existingSignatures, err := context.fetchExistingSignatures()
 	if err != nil {

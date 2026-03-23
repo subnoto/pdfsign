@@ -145,24 +145,28 @@ func (context *SignContext) createSignaturePlaceholder() []byte {
 		signature_buffer.WriteString(" >>\n")
 	}
 
+	// Predict the object ID for this signature dict so we can encrypt strings
+	// with the correct per-object key.
+	sigObjID := context.getNextObjectID()
+
 	if context.SignData.Signature.Info.Name != "" {
 		signature_buffer.WriteString(" /Name ")
-		signature_buffer.WriteString(pdfString(context.SignData.Signature.Info.Name))
+		signature_buffer.WriteString(context.encryptPdfString(sigObjID, context.SignData.Signature.Info.Name))
 		signature_buffer.WriteString("\n")
 	}
 	if context.SignData.Signature.Info.Location != "" {
 		signature_buffer.WriteString(" /Location ")
-		signature_buffer.WriteString(pdfString(context.SignData.Signature.Info.Location))
+		signature_buffer.WriteString(context.encryptPdfString(sigObjID, context.SignData.Signature.Info.Location))
 		signature_buffer.WriteString("\n")
 	}
 	if context.SignData.Signature.Info.Reason != "" {
 		signature_buffer.WriteString(" /Reason ")
-		signature_buffer.WriteString(pdfString(context.SignData.Signature.Info.Reason))
+		signature_buffer.WriteString(context.encryptPdfString(sigObjID, context.SignData.Signature.Info.Reason))
 		signature_buffer.WriteString("\n")
 	}
 	if context.SignData.Signature.Info.ContactInfo != "" {
 		signature_buffer.WriteString(" /ContactInfo ")
-		signature_buffer.WriteString(pdfString(context.SignData.Signature.Info.ContactInfo))
+		signature_buffer.WriteString(context.encryptPdfString(sigObjID, context.SignData.Signature.Info.ContactInfo))
 		signature_buffer.WriteString("\n")
 	}
 
@@ -178,7 +182,14 @@ func (context *SignContext) createSignaturePlaceholder() []byte {
 	// (PKCS #7) signatures").
 	if context.SignData.TSA.URL == "" && !context.SignData.Signature.Info.Date.IsZero() {
 		signature_buffer.WriteString(" /M ")
-		signature_buffer.WriteString(pdfDateTime(context.SignData.Signature.Info.Date))
+		// pdfDateTime calls pdfString internally; for encrypted PDFs use encryptPdfString
+		// on the raw date string instead.
+		if context.encryption != nil {
+			dateStr := formatPdfDateString(context.SignData.Signature.Info.Date)
+			signature_buffer.WriteString(context.encryptPdfString(sigObjID, dateStr))
+		} else {
+			signature_buffer.WriteString(pdfDateTime(context.SignData.Signature.Info.Date))
+		}
 		signature_buffer.WriteString("\n")
 	}
 
@@ -456,25 +467,28 @@ func (context *SignContext) replaceSignature() error {
 		return fmt.Errorf("failed to create signature: %w", err)
 	}
 
+	// Per ISO 32000-1:2008 §7.6.2, the Contents value of a Signature dictionary
+	// is NOT encrypted, even in encrypted PDFs. Write it as plain hex.
 	dst := make([]byte, hex.EncodedLen(len(signature)))
 	hex.Encode(dst, signature)
 
-	// Create the complete hex string content that will be stored in PDF
 	zeroPadding := bytes.Repeat([]byte("0"), int(context.SignatureMaxLength)-len(dst))
 
-	// Compute signature hash from the binary signature data + zero padding (matching verify package behavior)
-	// The verify package gets binary data from RawString() which includes the signature + zero padding
-	paddingBytes := make([]byte, len(zeroPadding)/2) // Convert hex padding to binary padding
+	// Compute signature hash from the binary signature data + zero padding
+	// (matching verify package behavior: RawString() returns signature + zero padding).
+	paddingBytes := make([]byte, len(zeroPadding)/2)
 	signatureWithPadding := append(signature, paddingBytes...)
 
 	signatureHasher := context.SignData.DigestAlgorithm.New()
 	signatureHasher.Write(signatureWithPadding)
 	context.computedSignatureHash = hex.EncodeToString(signatureHasher.Sum(nil))
 
-	if uint32(len(dst)) > context.SignatureMaxLength {
+	hexContent := append(dst, zeroPadding...)
+
+	if uint32(len(hexContent)) > context.SignatureMaxLength {
 		log.Println("Signature too long, retrying with increased buffer size.")
 		// set new base and try signing again
-		context.SignatureMaxLengthBase += (uint32(len(dst)) - context.SignatureMaxLength) + 1
+		context.SignatureMaxLengthBase += (uint32(len(hexContent)) - context.SignatureMaxLength) + 1
 		_, err := context.SignPDF()
 		return err
 	}
@@ -494,13 +508,15 @@ func (context *SignContext) replaceSignature() error {
 		return err
 	}
 
-	if _, err := context.OutputBuffer.Write([]byte(dst)); err != nil {
+	if _, err := context.OutputBuffer.Write(hexContent); err != nil {
 		return err
 	}
 
-	// Write 0s to ensure the signature remains the same size
-	if _, err := context.OutputBuffer.Write(zeroPadding); err != nil {
-		return err
+	// Pad with zeros if hexContent is shorter than SignatureMaxLength
+	if remaining := int(context.SignatureMaxLength) - len(hexContent); remaining > 0 {
+		if _, err := context.OutputBuffer.Write(bytes.Repeat([]byte("0"), remaining)); err != nil {
+			return err
+		}
 	}
 
 	if _, err := context.OutputBuffer.Write([]byte(">")); err != nil {

@@ -111,6 +111,14 @@ type SignDataSignatureInfo struct {
 // Remove the duplicated SignatureInfo and SignatureValidation types
 // They are now available in the common package
 
+// EncryptionContext holds encryption parameters from the original PDF.
+// When non-nil, new stream objects must be encrypted.
+type EncryptionContext struct {
+	Key        []byte
+	UseAES     bool
+	EncVersion int
+}
+
 type SignContext struct {
 	InputFile              io.ReadSeeker
 	OutputFile             io.Writer
@@ -129,6 +137,7 @@ type SignContext struct {
 	lastXrefID         uint32
 	newXrefEntries     []xrefEntry
 	updatedXrefEntries []xrefEntry
+	encryption         *EncryptionContext
 
 	// Computed signature information
 	computedDocumentHash  string
