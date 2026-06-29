@@ -239,7 +239,7 @@ func newMockTSAServer(t *testing.T) *httptest.Server {
 			Time:          time.Now().UTC(),
 			Policy:        asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 2, 1},
 		}
-		resp, err := ts.CreateResponse(tsaCert, tsaKey)
+		resp, err := ts.CreateResponseWithOpts(tsaCert, tsaKey, crypto.SHA256)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
