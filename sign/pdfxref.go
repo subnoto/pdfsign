@@ -58,7 +58,11 @@ func (context *SignContext) addObject(object []byte) (uint32, error) {
 }
 
 func (context *SignContext) updateObject(id uint32, object []byte) error {
-	gen := context.latestObjectGeneration(id) + 1
+	// Incremental updates must reuse the same object id at generation 0.
+	// Bumping the generation orphans existing references that are not
+	// rewritten in the same revision (e.g. the /Pages /Kids array still
+	// points at "<id> 0 R"), which breaks page-tree resolution on re-sign.
+	gen := 0
 	context.updatedXrefEntries = append(context.updatedXrefEntries, xrefEntry{
 		ID:         id,
 		Offset:     int64(context.OutputBuffer.Buff.Len()) + 1,

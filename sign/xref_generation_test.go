@@ -14,7 +14,7 @@ import (
 	"github.com/mattetti/filebuffer"
 )
 
-func TestUpdateObjectIncrementsGeneration(t *testing.T) {
+func TestUpdateObjectReusesGeneration(t *testing.T) {
 	input, err := os.Open("../testfiles/testfile12.pdf")
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +46,9 @@ func TestUpdateObjectIncrementsGeneration(t *testing.T) {
 	if len(ctx.updatedXrefEntries) != 1 {
 		t.Fatalf("updatedXrefEntries len = %d, want 1", len(ctx.updatedXrefEntries))
 	}
-	wantGen := int(startGen) + 1
+	// Incremental updates reuse the same object id at its existing generation
+	// so that references elsewhere (e.g. the /Pages /Kids array) stay valid.
+	wantGen := int(startGen)
 	if ctx.updatedXrefEntries[0].Generation != wantGen {
 		t.Fatalf("xref generation = %d, want %d", ctx.updatedXrefEntries[0].Generation, wantGen)
 	}
@@ -197,11 +199,11 @@ func TestLatestObjectGenerationFromSignedPDF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(raw, []byte(fmt.Sprintf("\n%d 1 obj", pageID))) {
-		t.Fatalf("signed PDF missing %d 1 obj header; page headers: %v", pageID, objectHeaders(raw, pageID))
+	if !bytes.Contains(raw, []byte(fmt.Sprintf("\n%d 0 obj", pageID))) {
+		t.Fatalf("signed PDF missing %d 0 obj header; page headers: %v", pageID, objectHeaders(raw, pageID))
 	}
-	if got := ctx.latestObjectGeneration(pageID); got != 1 {
-		t.Fatalf("latestObjectGeneration(%d) = %d, want 1", pageID, got)
+	if got := ctx.latestObjectGeneration(pageID); got != 0 {
+		t.Fatalf("latestObjectGeneration(%d) = %d, want 0", pageID, got)
 	}
 }
 
@@ -249,10 +251,10 @@ func TestSignedPDFIncrementalXrefGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(data, []byte(fmt.Sprintf("\n%d 1 obj", pageID))) {
-		t.Fatalf("missing updated page object header %d 1 obj", pageID)
+	if !bytes.Contains(data, []byte(fmt.Sprintf("\n%d 0 obj", pageID))) {
+		t.Fatalf("missing updated page object header %d 0 obj", pageID)
 	}
-	if !bytes.Contains(data, []byte("00001 n")) {
-		t.Fatal("expected incremental xref entry with generation 1")
+	if !bytes.Contains(data, []byte("00000 n")) {
+		t.Fatal("expected incremental xref entry with generation 0")
 	}
 }

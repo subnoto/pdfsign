@@ -143,14 +143,14 @@ func TestUpdateObject(t *testing.T) {
 			name:         "valid update",
 			objectID:     5,
 			object:       []byte("updated content"),
-			expectedText: "5 1 obj\nupdated content\nendobj\n",
+			expectedText: "5 0 obj\nupdated content\nendobj\n",
 			wantErr:      false,
 		},
 		{
 			name:         "update with whitespace",
 			objectID:     8,
 			object:       []byte("  updated content  "),
-			expectedText: "8 1 obj\nupdated content\nendobj\n",
+			expectedText: "8 0 obj\nupdated content\nendobj\n",
 			wantErr:      false,
 		},
 	}
