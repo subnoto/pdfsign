@@ -117,7 +117,7 @@ func TestReplaceSignatureTooSmallReturnsRetryError(t *testing.T) {
 	if ctx.SignatureMaxLengthBase <= 100 {
 		t.Fatalf("expected SignatureMaxLengthBase to increase, got %d", ctx.SignatureMaxLengthBase)
 	}
-	if !errors.Is(errSignatureBufferTooSmall, errSignatureBufferTooSmall) {
-		t.Fatal("errSignatureBufferTooSmall sentinel missing")
+	if !errors.Is(errors.Join(errSignatureBufferTooSmall), errSignatureBufferTooSmall) {
+		t.Fatal("errSignatureBufferTooSmall should be detectable via errors.Is when wrapped")
 	}
 }

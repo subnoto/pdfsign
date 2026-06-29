@@ -182,8 +182,8 @@ validate_pdfcpu() {
 validate_pdfsign() {
   local signed_file="$1"
   local out valid
-  out=$("$PDFSIGN" verify "$signed_file" 2>/dev/null)
-  valid=$(echo "$out" | jq -r '.Signatures[0].validation.valid_signature // empty')
+  out=$("$PDFSIGN" verify "$signed_file" 2>/dev/null || true)
+  valid=$(echo "$out" | jq -r '.Signatures[0].validation.valid_signature // empty' 2>/dev/null || true)
   if [[ "$valid" == "true" ]]; then
     echo "  ✅ pdfsign verify (CMS + byte range, RFC 5652/9336)"
     return 0

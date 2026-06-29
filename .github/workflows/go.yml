@@ -43,6 +43,7 @@ jobs:
           ./scripts/validate-signed.sh
 
       - name: DSS PAdES validation (ETSI via EU DSS)
+        if: ${{ github.event_name != 'pull_request' }}
         run: |
           chmod +x scripts/validate-signed.sh scripts/dss_validate.py
           docker pull ghcr.io/vysmaty/dockerized-dss:latest

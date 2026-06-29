@@ -521,7 +521,7 @@ Signed outputs land in `testfiles/success/` during tests. CI validates those PDF
 ```bash
 go test -v ./sign/...                    # generate signed fixtures (incl. LTV/LTA)
 ./scripts/validate-signed.sh             # pdfcpu (ISO 32000) + pdfsign verify (RFC 5652/9336)
-./scripts/validate-signed.sh --dss --with-dss-docker   # + EU DSS / ETSI PAdES rules
+./scripts/validate-signed.sh --dss --with-dss-docker   # + EU DSS / ETSI PAdES rules (CI: push to main / workflow_dispatch only)
 ```
 
 LTV/LTA fixtures (`*_TestSignLTV.pdf`, `*_TestSignLTA.pdf`) are produced by `TestSignLTVFixtures` and `TestSignLTAFixtures` using the Belgian Federal TSA (`http://tsa.belgium.be/connect`, Belgian Root CA6 chain) and mock OCSP for the document security store.

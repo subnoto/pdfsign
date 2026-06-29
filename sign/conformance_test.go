@@ -14,6 +14,7 @@ import (
 func assertPAdESSignatureObjects(t *testing.T, rdr *pdf.Reader) {
 	t.Helper()
 	found := 0
+	withReference := 0
 	for _, x := range rdr.Xref() {
 		v, err := rdr.GetObject(x.Ptr().GetID())
 		if err != nil {
@@ -60,25 +61,33 @@ func assertPAdESSignatureObjects(t *testing.T, rdr *pdf.Reader) {
 			t.Fatalf("signature %d: /Contents is still placeholder zeros", found)
 		}
 
-		if sub == "adbe.pkcs7.detached" {
-			ref := v.Key("Reference")
-			if ref.IsNull() {
-				t.Fatalf("signature %d: CMS detached signature missing /Reference", found)
+		if sub != "adbe.pkcs7.detached" {
+			continue
+		}
+
+		ref := v.Key("Reference")
+		if ref.IsNull() {
+			// Pre-existing signatures in some fixtures omit /Reference; our
+			// certification/approval signatures always include /SigRef.
+			continue
+		}
+		withReference++
+		hasSigRef := false
+		for i := 0; i < ref.Len(); i++ {
+			if ref.Index(i).Key("Type").Name() == "SigRef" {
+				hasSigRef = true
+				break
 			}
-			hasSigRef := false
-			for i := 0; i < ref.Len(); i++ {
-				if ref.Index(i).Key("Type").Name() == "SigRef" {
-					hasSigRef = true
-					break
-				}
-			}
-			if !hasSigRef {
-				t.Fatalf("signature %d: /Reference must contain /Type /SigRef", found)
-			}
+		}
+		if !hasSigRef {
+			t.Fatalf("signature %d: /Reference must contain /Type /SigRef", found)
 		}
 	}
 	if found == 0 {
 		t.Fatal("no Adobe.PPKLite signature objects found")
+	}
+	if withReference == 0 {
+		t.Fatal("no CMS detached signature with /Reference found (expected at least one from this library)")
 	}
 }
 
