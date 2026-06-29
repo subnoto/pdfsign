@@ -89,6 +89,13 @@ type VisualSignData struct {
 	objectId     uint32
 }
 
+// existingSignatureField identifies a prior signature widget annotation listed
+// in AcroForm /Fields (not the /V signature dictionary).
+type existingSignatureField struct {
+	widgetID   uint32
+	generation uint16
+}
+
 type InfoData struct {
 	ObjectId uint32
 }
@@ -151,7 +158,7 @@ type SignContext struct {
 	SignatureMaxLength     uint32
 	SignatureMaxLengthBase uint32
 
-	existingSignatures []SignData
+	existingSignatures []existingSignatureField
 	lastXrefID         uint32
 	newXrefEntries     []xrefEntry
 	updatedXrefEntries []xrefEntry

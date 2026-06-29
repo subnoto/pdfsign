@@ -143,7 +143,10 @@ func (context *SignContext) createCatalog() ([]byte, error) {
 				if i > 0 {
 					catalog_buffer.WriteString(" ")
 				}
-				catalog_buffer.WriteString(strconv.Itoa(int(sig.objectId)) + " 0 R")
+				catalog_buffer.WriteString(strconv.Itoa(int(sig.widgetID)))
+				catalog_buffer.WriteString(" ")
+				catalog_buffer.WriteString(strconv.Itoa(int(sig.generation)))
+				catalog_buffer.WriteString(" R")
 			}
 			if len(context.existingSignatures) > 0 {
 				catalog_buffer.WriteString(" ")
@@ -158,7 +161,10 @@ func (context *SignContext) createCatalog() ([]byte, error) {
 			if i > 0 {
 				catalog_buffer.WriteString(" ")
 			}
-			catalog_buffer.WriteString(strconv.Itoa(int(sig.objectId)) + " 0 R")
+			catalog_buffer.WriteString(strconv.Itoa(int(sig.widgetID)))
+			catalog_buffer.WriteString(" ")
+			catalog_buffer.WriteString(strconv.Itoa(int(sig.generation)))
+			catalog_buffer.WriteString(" R")
 		}
 
 		if len(context.existingSignatures) > 0 {

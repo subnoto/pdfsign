@@ -149,7 +149,19 @@ signed_to_source_filename() {
   # testfile12_TestSignPDFVisibleAll.pdf -> testfile12.pdf
   # gen_pdf14_acroform_TestSignLTV.pdf -> gen_pdf14_acroform.pdf
   # testfile20_TestSignLTA.pdf -> testfile20.pdf
-  echo "$1" | sed -E 's/_(TestSignPDF|TestSignPDFVisibleAll|TestSignLTV|TestSignLTA)\.pdf$/.pdf/'
+  # testfile20_TestMultiSignThreeApprovals.pdf -> testfile20.pdf
+  echo "$1" | sed -E 's/_(TestSignPDF|TestSignPDFVisibleAll|TestSignLTV|TestSignLTA|TestMultiSign[^.]*)\.pdf$/.pdf/'
+}
+
+expected_signature_count() {
+  local filename="$1"
+  case "$filename" in
+    *TestMultiSignThreeApprovals*) echo 3 ;;
+    *TestMultiSignVisibleTwice*|*TestMultiSignTwice*) echo 2 ;;
+    *TestMultiSignTSAThenApproval*|*TestMultiSignLTVThenApproval*) echo 2 ;;
+    *TestMultiSign*) echo 2 ;;
+    *) echo 1 ;;
+  esac
 }
 
 should_skip_pdf() {
@@ -179,28 +191,44 @@ validate_pdfcpu() {
     return 1
   fi
 
-  local sig_out
-  sig_out=$(pdfcpu signatures validate -f "$signed_file" 2>&1) || true
-  if echo "$sig_out" | grep -q "DocModified: false"; then
-    echo "  ✅ pdfcpu signature integrity (byte range / DocModified: false)"
-  else
-    echo "  ❌ pdfcpu signature integrity FAILED" >&2
+  local sig_out ok_count bad_count expected
+  expected=$(expected_signature_count "$filename")
+  sig_out=$(pdfcpu signatures validate -a -f "$signed_file" 2>&1) || true
+  ok_count=$(echo "$sig_out" | grep -c "DocModified: false" || true)
+  bad_count=$(echo "$sig_out" | grep -c "DocModified: true" || true)
+  if [[ $bad_count -gt 0 ]]; then
+    echo "  ❌ pdfcpu signature integrity FAILED ($bad_count signature(s) with DocModified: true)" >&2
     echo "$sig_out" >&2
     return 1
   fi
+  if [[ $ok_count -lt $expected ]]; then
+    echo "  ❌ pdfcpu signature integrity FAILED (expected $expected valid signature(s), got $ok_count DocModified: false)" >&2
+    echo "$sig_out" >&2
+    return 1
+  fi
+  echo "  ✅ pdfcpu signature integrity ($ok_count/$expected signature(s), DocModified: false)"
 }
 
 validate_pdfsign() {
   local signed_file="$1"
-  local out valid
+  local filename out total valid_count invalid_count expected
+  filename=$(basename "$signed_file")
+  expected=$(expected_signature_count "$filename")
   out=$("$PDFSIGN" verify "$signed_file" 2>/dev/null || true)
-  valid=$(echo "$out" | jq -r '.Signatures[0].validation.valid_signature // empty' 2>/dev/null || true)
-  if [[ "$valid" == "true" ]]; then
-    echo "  ✅ pdfsign verify (CMS + byte range, RFC 5652/9336)"
+  total=$(echo "$out" | jq '.Signatures | length' 2>/dev/null || echo 0)
+  valid_count=$(echo "$out" | jq '[.Signatures[].validation.valid_signature] | map(select(. == true)) | length' 2>/dev/null || echo 0)
+  invalid_count=$(echo "$out" | jq '[.Signatures[].validation.valid_signature] | map(select(. == false)) | length' 2>/dev/null || echo 0)
+  if [[ $total -lt $expected ]]; then
+    echo "  ❌ pdfsign verify FAILED (expected at least $expected signature(s), got $total)" >&2
+    echo "$out" | jq '.Signatures[] | {name: .name, valid: .validation.valid_signature, error: .validation.error}' >&2 || echo "$out" >&2
+    return 1
+  fi
+  if [[ $valid_count -eq $total && $total -gt 0 ]]; then
+    echo "  ✅ pdfsign verify ($valid_count/$total signature(s), CMS + byte range, RFC 5652/9336)"
     return 0
   fi
-  echo "  ❌ pdfsign verify FAILED (valid_signature=$valid)" >&2
-  echo "$out" | jq '.Signatures[0].validation // .Signatures[0]' >&2 || echo "$out" >&2
+  echo "  ❌ pdfsign verify FAILED ($valid_count/$total valid, $invalid_count invalid)" >&2
+  echo "$out" | jq '.Signatures[] | {name: .name, valid: .validation.valid_signature, error: .validation.error}' >&2 || echo "$out" >&2
   return 1
 }
 
@@ -211,7 +239,7 @@ validate_dss() {
   base=$(basename "$signed_file")
   if [[ "$base" == *"_TestSignLTA"* ]]; then
     profile="lta"
-  elif [[ "$base" == *"_TestSignLTV"* ]]; then
+  elif [[ "$base" == *"_TestSignLTV"* || "$base" == *"_TestMultiSignLTV"* ]]; then
     profile="ltv"
   fi
   python3 "$ROOT/scripts/dss_validate.py" --url "$DSS_URL" --profile "$profile" "$signed_file"

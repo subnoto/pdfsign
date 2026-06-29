@@ -77,14 +77,44 @@ func loadCertificateAndKey(t *testing.T) (*x509.Certificate, *rsa.PrivateKey) {
 	return cert, pkey
 }
 
-func verifySignedFile(t *testing.T, tmpfile *os.File, originalFileName string) {
-	_, err := verify.VerifyFile(tmpfile)
+func verifyAllSignaturesValid(t *testing.T, tmpfile *os.File, minSignatures int) {
+	t.Helper()
+	if _, err := tmpfile.Seek(0, 0); err != nil {
+		t.Fatalf("%s: %s", tmpfile.Name(), err.Error())
+	}
+	resp, err := verify.VerifyFile(tmpfile)
 	if err != nil {
 		t.Fatalf("%s: %s", tmpfile.Name(), err.Error())
+	}
+	if minSignatures > 0 && len(resp.Signatures) < minSignatures {
+		t.Fatalf("%s: expected at least %d signatures, got %d", tmpfile.Name(), minSignatures, len(resp.Signatures))
+	}
+	for i, sig := range resp.Signatures {
+		if !sig.Validation.ValidSignature {
+			t.Fatalf("%s: signature %d (%q) is not valid", tmpfile.Name(), i+1, sig.Info.Reason)
+		}
+	}
+}
 
+func verifySignedFile(t *testing.T, tmpfile *os.File, originalFileName string) {
+	if _, err := tmpfile.Seek(0, 0); err != nil {
+		t.Fatalf("%s: %s", tmpfile.Name(), err.Error())
+	}
+	resp, err := verify.VerifyFile(tmpfile)
+	if err != nil {
 		err2 := os.Rename(tmpfile.Name(), "../testfiles/failed/"+originalFileName)
 		if err2 != nil {
 			t.Error(err2)
+		}
+		t.Fatalf("%s: %s", tmpfile.Name(), err.Error())
+	}
+	for i, sig := range resp.Signatures {
+		if !sig.Validation.ValidSignature {
+			err2 := os.Rename(tmpfile.Name(), "../testfiles/failed/"+originalFileName)
+			if err2 != nil {
+				t.Error(err2)
+			}
+			t.Fatalf("%s: signature %d (%q) is not valid", tmpfile.Name(), i+1, sig.Info.Reason)
 		}
 	}
 }
@@ -1787,7 +1817,7 @@ func TestSuccessFixturesConformance(t *testing.T) {
 			switch {
 			case strings.Contains(base, "_TestSignLTA"):
 				assertLTAPDFMarkers(t, path)
-			case strings.Contains(base, "_TestSignLTV"):
+			case strings.Contains(base, "_TestSignLTV") || strings.Contains(base, "_TestMultiSignLTV"):
 				assertLTVPDFMarkers(t, path)
 			}
 		})

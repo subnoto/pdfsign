@@ -143,14 +143,14 @@ func TestUpdateObject(t *testing.T) {
 			name:         "valid update",
 			objectID:     5,
 			object:       []byte("updated content"),
-			expectedText: "5 0 obj\nupdated content\nendobj\n",
+			expectedText: "5 1 obj\nupdated content\nendobj\n",
 			wantErr:      false,
 		},
 		{
 			name:         "update with whitespace",
 			objectID:     8,
 			object:       []byte("  updated content  "),
-			expectedText: "8 0 obj\nupdated content\nendobj\n",
+			expectedText: "8 1 obj\nupdated content\nendobj\n",
 			wantErr:      false,
 		},
 	}
@@ -179,6 +179,13 @@ func TestUpdateObject(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestHighestObjectGenerationInPDF(t *testing.T) {
+	data := []byte("7 0 obj\n<<>>\nendobj\n\n7 1 obj\n<<>>\nendobj\n")
+	if got := highestObjectGenerationInPDF(data, 7); got != 1 {
+		t.Fatalf("highestObjectGenerationInPDF = %d, want 1", got)
 	}
 }
 
@@ -215,7 +222,7 @@ func TestWriteObject(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			context.OutputBuffer.Buff.Reset()
-			err := context.writeObject(tt.objectID, tt.object)
+			err := context.writeObject(tt.objectID, 0, tt.object)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("writeObject() error = %v, wantErr %v", err, tt.wantErr)
 				return

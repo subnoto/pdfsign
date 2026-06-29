@@ -554,8 +554,8 @@ func (context *SignContext) replaceSignature() error {
 	return nil
 }
 
-func (context *SignContext) fetchExistingSignatures() ([]SignData, error) {
-	var signatures []SignData
+func (context *SignContext) fetchExistingSignatures() ([]existingSignatureField, error) {
+	var signatures []existingSignatureField
 
 	acroForm := context.PDFReader.Trailer().Key("Root").Key("AcroForm")
 	if acroForm.IsNull() {
@@ -569,13 +569,17 @@ func (context *SignContext) fetchExistingSignatures() ([]SignData, error) {
 
 	for i := 0; i < fields.Len(); i++ {
 		field := fields.Index(i)
-		if field.Key("FT").Name() == "Sig" {
-			ptr := field.GetPtr()
-			sig := SignData{
-				objectId: uint32(ptr.GetID()),
-			}
-			signatures = append(signatures, sig)
+		if field.Key("FT").Name() != "Sig" {
+			continue
 		}
+		ptr := field.GetPtr()
+		if ptr.GetID() == 0 {
+			continue
+		}
+		signatures = append(signatures, existingSignatureField{
+			widgetID:   uint32(ptr.GetID()),
+			generation: ptr.GetGen(),
+		})
 	}
 
 	return signatures, nil

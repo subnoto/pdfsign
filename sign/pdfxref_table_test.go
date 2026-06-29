@@ -15,8 +15,8 @@ func TestWriteIncrXrefTable(t *testing.T) {
 		},
 		lastXrefID: 100,
 		updatedXrefEntries: []xrefEntry{
-			{ID: 50, Offset: 1234},
-			{ID: 51, Offset: 5678},
+			{ID: 50, Offset: 1234, Generation: 2},
+			{ID: 51, Offset: 5678, Generation: 1},
 		},
 		newXrefEntries: []xrefEntry{
 			{ID: 101, Offset: 9012},
@@ -33,9 +33,9 @@ func TestWriteIncrXrefTable(t *testing.T) {
 	// Verify output
 	expected := "xref\n" +
 		"50 1\n" +
-		"0000001234 00000 n\r\n" +
+		"0000001234 00002 n\r\n" +
 		"51 1\n" +
-		"0000005678 00000 n\r\n" +
+		"0000005678 00001 n\r\n" +
 		"101 2\n" +
 		"0000009012 00000 n\r\n" +
 		"0000003456 00000 n\r\n"

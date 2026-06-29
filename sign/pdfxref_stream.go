@@ -62,12 +62,12 @@ func (context *SignContext) writeXrefStream() error {
 func writeXrefStreamEntries(buffer *bytes.Buffer, context *SignContext) error {
 	// Write updated entries first
 	for _, entry := range context.updatedXrefEntries {
-		writeXrefStreamLine(buffer, 1, int(entry.Offset), 0)
+		writeXrefStreamLine(buffer, 1, int(entry.Offset), xrefStreamGeneration(entry.Generation))
 	}
 
 	// Write new entries
 	for _, entry := range context.newXrefEntries {
-		writeXrefStreamLine(buffer, 1, int(entry.Offset), 0)
+		writeXrefStreamLine(buffer, 1, int(entry.Offset), xrefStreamGeneration(entry.Generation))
 	}
 
 	return nil
@@ -161,6 +161,16 @@ func writeXrefStreamContent(buffer *bytes.Buffer, streamBytes []byte) error {
 	}
 
 	return nil
+}
+
+func xrefStreamGeneration(gen int) byte {
+	if gen < 0 {
+		return 0
+	}
+	if gen > 255 {
+		return 255
+	}
+	return byte(gen)
 }
 
 // writeXrefStreamLine writes a single line in the xref stream.

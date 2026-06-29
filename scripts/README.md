@@ -9,12 +9,13 @@ Three layers validate outputs under `testfiles/success/` (created by `go test -v
 | PAdES structure + crypto (Go tests) | `sign/conformance_test.go` | ISO 32000 signature dictionaries, PAdES CMS detached profile |
 | PAdES validation (optional) | [EU DSS](https://github.com/esig/dss) via REST | ETSI EN 319 142; CI runs on every push/PR to `main` and on `workflow_dispatch` |
 | LTV / LTA fixtures | `TestSignLTVFixtures`, `TestSignLTAFixtures` | PAdES B-LT / B-LTA (`/DSS`, `/VRI`, `/DocTimeStamp`) |
+| Multi-party fixtures | `TestMultiSignFixtures` | Incremental signing (2–3 signatures per PDF) |
 
 ## Quick start
 
 ```bash
-# 1. Generate signed fixtures (standard + LTV/LTA; LTV/LTA need network for Belgian TSA)
-go test -v ./sign/ -run 'TestSignPDF|TestSignPDFVisibleAll|TestSignLTV|TestSignLTA'
+# 1. Generate signed fixtures (standard + LTV/LTA + multi-party; LTV/LTA need network for Belgian TSA)
+go test -v ./sign/ -run 'TestSignPDF|TestSignPDFVisibleAll|TestSignLTV|TestSignLTA|TestMultiSignFixtures'
 
 # 2. pdfcpu + pdfsign verify
 ./scripts/validate-signed.sh
@@ -56,6 +57,11 @@ Profiles are inferred from filenames:
 | `*_TestSignPDF*.pdf` | B-B / B-T | — |
 | `*_TestSignLTV.pdf` | B-LT | `/Type /DSS`, `/VRI` |
 | `*_TestSignLTA.pdf` | B-LTA | above + `/Type /DocTimeStamp` |
+| `*_TestMultiSign*.pdf` | B-B / B-T (or B-LT for `*LTV*`) | all signatures in `DiagnosticData` must pass integrity checks |
+
+Multi-party fixtures (`TestMultiSignFixtures`) expect 2–3 signatures depending on filename
+(e.g. `*_TestMultiSignThreeApprovals.pdf` → 3). `validate-signed.sh` and `dss_validate.py`
+validate **every** signature, not only the first.
 
 LTV/LTA fixtures use the **Belgian Federal TSA** (`http://tsa.belgium.be/connect`, Belgian Root CA6).
 
