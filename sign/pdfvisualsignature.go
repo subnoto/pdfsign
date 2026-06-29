@@ -102,7 +102,10 @@ func (context *SignContext) createVisualSignature(visible bool, pageNumber uint3
 	// Define the field type as a signature.
 	visual_signature.WriteString("  /FT /Sig\n")
 	// Set a unique title for the signature field.
-	visual_signature.WriteString(fmt.Sprintf("  /T %s\n", pdfString("Signature "+strconv.Itoa(len(context.existingSignatures)+1))))
+	// The visual signature object will be the next object added by the caller.
+	// Use getNextObjectID() to predict its ID for string encryption.
+	vsObjID := context.getNextObjectID()
+	visual_signature.WriteString(fmt.Sprintf("  /T %s\n", context.encryptPdfString(vsObjID, "Signature "+strconv.Itoa(len(context.existingSignatures)+1))))
 
 	// Reference the signature dictionary.
 	visual_signature.WriteString(fmt.Sprintf("  /V %d 0 R\n", context.SignData.objectId))
@@ -156,7 +159,28 @@ func (context *SignContext) createIncPageUpdate(pageNumber, annot uint32) ([]byt
 			page_buffer.WriteString(fmt.Sprintf("    %d 0 R\n", annot))
 			page_buffer.WriteString("  ]\n")
 		default:
-			page_buffer.WriteString(fmt.Sprintf("  /%s %s\n", key, page.Key(key).String()))
+			// Some page dictionaries contain stream-typed values (e.g.
+			// /AAPL:PPK added by macOS Preview for its embedded signature
+			// data). Per ISO 32000, streams must always be indirect objects.
+			//
+			// digitorus/pdf's value.String() returns an internal debug
+			// representation for streams (e.g. "<</Length 284>>@600" where
+			// @600 is the byte offset), which is not valid PDF syntax.
+			// Writing this verbatim into the incremental page update causes
+			// downstream PDF parsers (e.g. @libpdf/core) to fail with
+			// "Invalid dictionary key: expected name, got keyword" when they
+			// encounter the @offset token.
+			//
+			// Fix: emit stream values as indirect references (N N R) using
+			// their original object ID. All other value types are serialized
+			// with value.String() which produces correct PDF syntax.
+			v := page.Key(key)
+			if v.Kind() == pdf.Stream {
+				ptr := v.GetPtr()
+				page_buffer.WriteString(fmt.Sprintf("  /%s %d %d R\n", key, ptr.GetID(), ptr.GetGen()))
+			} else {
+				page_buffer.WriteString(fmt.Sprintf("  /%s %s\n", key, v.String()))
+			}
 		}
 	}
 

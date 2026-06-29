@@ -12,6 +12,9 @@ import (
 func (context *SignContext) createCatalog() ([]byte, error) {
 	var catalog_buffer bytes.Buffer
 
+	// Predict the catalog object ID for string encryption.
+	catalogObjID := context.getNextObjectID()
+
 	// Start the catalog object
 	catalog_buffer.WriteString("<<\n")
 	catalog_buffer.WriteString("  /Type /Catalog\n")
@@ -42,7 +45,7 @@ func (context *SignContext) createCatalog() ([]byte, error) {
 	for _, key := range root.Keys() {
 		if key != "Type" && key != "AcroForm" {
 			_, _ = fmt.Fprintf(&catalog_buffer, "  /%s ", key)
-			context.serializeCatalogEntry(&catalog_buffer, rootPtr.GetID(), root.Key(key))
+			context.serializeCatalogEntry(&catalog_buffer, rootPtr.GetID(), root.Key(key), catalogObjID)
 			catalog_buffer.WriteString("\n")
 		}
 	}
@@ -82,7 +85,7 @@ func (context *SignContext) createCatalog() ([]byte, error) {
 						catalog_buffer.WriteString(" R")
 					} else {
 						// Direct value
-						context.serializeCatalogEntry(&catalog_buffer, rootPtr.GetID(), v)
+						context.serializeCatalogEntry(&catalog_buffer, rootPtr.GetID(), v, catalogObjID)
 					}
 				}
 
@@ -106,9 +109,9 @@ func (context *SignContext) createCatalog() ([]byte, error) {
 				// Ensure DA is written as a string
 				_, _ = fmt.Fprintf(&catalog_buffer, "    /%s ", key)
 				if daValue.Kind() == pdf.String {
-					_, _ = fmt.Fprintf(&catalog_buffer, "(%s)", daValue.RawString())
+					_, _ = fmt.Fprint(&catalog_buffer, context.encryptPdfString(catalogObjID, daValue.RawString()))
 				} else {
-					context.serializeCatalogEntry(&catalog_buffer, rootPtr.GetID(), daValue)
+					context.serializeCatalogEntry(&catalog_buffer, rootPtr.GetID(), daValue, catalogObjID)
 				}
 				catalog_buffer.WriteString("\n")
 				continue
@@ -116,7 +119,7 @@ func (context *SignContext) createCatalog() ([]byte, error) {
 
 			// Copy other AcroForm entries as-is.
 			_, _ = fmt.Fprintf(&catalog_buffer, "    /%s ", key)
-			context.serializeCatalogEntry(&catalog_buffer, rootPtr.GetID(), acro.Key(key))
+			context.serializeCatalogEntry(&catalog_buffer, rootPtr.GetID(), acro.Key(key), catalogObjID)
 			catalog_buffer.WriteString("\n")
 		}
 
@@ -199,7 +202,8 @@ func (context *SignContext) createCatalog() ([]byte, error) {
 }
 
 // serializeCatalogEntry takes a pdf.Value and serializes it to the given writer.
-func (context *SignContext) serializeCatalogEntry(w io.Writer, rootObjId uint32, value pdf.Value) {
+// targetObjID is the object ID of the object being written, used for string encryption.
+func (context *SignContext) serializeCatalogEntry(w io.Writer, rootObjId uint32, value pdf.Value, targetObjID ...uint32) {
 	if ptr := value.GetPtr(); ptr.GetID() != rootObjId {
 		// Indirect object
 		_, _ = fmt.Fprintf(w, "%d %d R", ptr.GetID(), ptr.GetGen())
@@ -209,7 +213,11 @@ func (context *SignContext) serializeCatalogEntry(w io.Writer, rootObjId uint32,
 	// Direct object
 	switch value.Kind() {
 	case pdf.String:
-		_, _ = fmt.Fprintf(w, "(%s)", value.RawString())
+		if context.encryption != nil && len(targetObjID) > 0 {
+			_, _ = fmt.Fprint(w, context.encryptPdfString(targetObjID[0], value.RawString()))
+		} else {
+			_, _ = fmt.Fprintf(w, "(%s)", value.RawString())
+		}
 	case pdf.Null:
 		_, _ = fmt.Fprint(w, "null")
 	case pdf.Bool:
@@ -231,7 +239,7 @@ func (context *SignContext) serializeCatalogEntry(w io.Writer, rootObjId uint32,
 				_, _ = fmt.Fprint(w, " ") // Space between items
 			}
 			_, _ = fmt.Fprintf(w, "/%s ", key)
-			context.serializeCatalogEntry(w, rootObjId, value.Key(key))
+			context.serializeCatalogEntry(w, rootObjId, value.Key(key), targetObjID...)
 		}
 		_, _ = fmt.Fprint(w, ">>")
 	case pdf.Array:
@@ -240,7 +248,7 @@ func (context *SignContext) serializeCatalogEntry(w io.Writer, rootObjId uint32,
 			if idx > 0 {
 				_, _ = fmt.Fprint(w, " ") // Space between items
 			}
-			context.serializeCatalogEntry(w, rootObjId, value.Index(idx))
+			context.serializeCatalogEntry(w, rootObjId, value.Index(idx), targetObjID...)
 		}
 		_, _ = fmt.Fprint(w, "]")
 	case pdf.Stream:

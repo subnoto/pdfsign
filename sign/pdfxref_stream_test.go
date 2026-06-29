@@ -3,6 +3,7 @@ package sign
 import (
 	"bytes"
 	"compress/zlib"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -227,5 +228,47 @@ func TestWriteXrefStream(t *testing.T) {
 		if !strings.Contains(output, elem) {
 			t.Errorf("Output missing required element: %s", elem)
 		}
+	}
+}
+
+func TestWriteXrefStreamPreservesEncrypt(t *testing.T) {
+	inputPath := "../testfiles/testfile_encrypted.pdf"
+	inputFile, err := os.Open(inputPath)
+	if err != nil {
+		t.Skipf("encrypted fixture missing: %v", err)
+	}
+	defer func() { _ = inputFile.Close() }()
+
+	finfo, err := inputFile.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := pdf.NewReaderEncrypted(inputFile, finfo.Size(), func() string { return "" })
+	if err != nil {
+		t.Fatalf("NewReaderEncrypted: %v", err)
+	}
+
+	enc := r.Trailer().Key("Encrypt")
+	if enc.IsNull() {
+		t.Fatal("fixture should be encrypted")
+	}
+	encRef := enc.GetPtr()
+
+	outputBuf := &filebuffer.Buffer{Buff: new(bytes.Buffer)}
+	context := &SignContext{
+		InputFile:      inputFile,
+		PDFReader:      r,
+		OutputBuffer:   outputBuf,
+		newXrefEntries: []xrefEntry{{ID: 1, Offset: 100}},
+	}
+
+	if err := context.writeXrefStream(); err != nil {
+		t.Fatalf("writeXrefStream: %v", err)
+	}
+
+	want := fmt.Sprintf("/Encrypt %d %d R", encRef.GetID(), encRef.GetGen())
+	if !strings.Contains(outputBuf.Buff.String(), want) {
+		t.Fatalf("xref stream missing %q in:\n%s", want, outputBuf.Buff.String())
 	}
 }

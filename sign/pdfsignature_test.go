@@ -1,8 +1,12 @@
 package sign
 
 import (
+	"crypto"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,5 +82,98 @@ func TestCreateSignaturePlaceholder(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestCreateSignaturePlaceholderWithTSAAndDate(t *testing.T) {
+	inputFile, err := os.Open("../testfiles/testfile20.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = inputFile.Close() }()
+
+	finfo, err := inputFile.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rdr, err := pdf.NewReader(inputFile, finfo.Size())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	timezone, _ := time.LoadLocation("Europe/Tallinn")
+	now := time.Date(2017, 9, 23, 14, 39, 0, 0, timezone)
+
+	signData := SignData{
+		Signature: SignDataSignature{
+			Info: SignDataSignatureInfo{
+				Name: "John Doe",
+				Date: now,
+			},
+			CertType: ApprovalSignature,
+		},
+		TSA: TSA{URL: "https://example.com/tsa"},
+	}
+	signData.objectId = uint32(rdr.XrefInformation.ItemCount) + 3
+
+	context := SignContext{
+		PDFReader: rdr,
+		InputFile: inputFile,
+		SignData:  signData,
+	}
+
+	placeholder := string(context.createSignaturePlaceholder())
+	if !strings.Contains(placeholder, "/M ") || !strings.Contains(placeholder, "D:20170923143900") {
+		t.Fatalf("expected /M date even when TSA is configured, got:\n%s", placeholder)
+	}
+}
+
+func TestTimestampHTTPClientUsed(t *testing.T) {
+	var hit bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		if r.Method != "POST" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	orig := TimestampHTTPClient
+	TimestampHTTPClient = server.Client()
+	defer func() { TimestampHTTPClient = orig }()
+
+	inputFile, err := os.Open("../testfiles/testfile20.pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = inputFile.Close() }()
+
+	finfo, err := inputFile.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rdr, err := pdf.NewReader(inputFile, finfo.Size())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := SignContext{
+		PDFReader: rdr,
+		SignData: SignData{
+			DigestAlgorithm: crypto.SHA256,
+			TSA:             TSA{URL: server.URL},
+		},
+	}
+
+	_, err = ctx.GetTSA([]byte("digest-bytes"))
+	if err == nil {
+		t.Fatal("expected TSA error from mock server")
+	}
+	if !hit {
+		t.Fatal("TimestampHTTPClient did not reach mock TSA server")
 	}
 }

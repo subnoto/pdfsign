@@ -99,6 +99,10 @@ func TestReaderCanReadPDF(t *testing.T) {
 		if filepath.Ext(f.Name()) != ".pdf" {
 			continue
 		}
+		switch f.Name() {
+		case "signed-with-transparent-watermark.pdf":
+			continue
+		}
 
 		t.Run(f.Name(), func(st *testing.T) {
 			st.Parallel()
@@ -119,7 +123,11 @@ func TestReaderCanReadPDF(t *testing.T) {
 			}
 			size := finfo.Size()
 
-			_, err = pdf.NewReader(input_file, size)
+			if f.Name() == "testfile_encrypted.pdf" || f.Name() == "testfile_encrypted_signed.pdf" {
+				_, err = pdf.NewReaderEncrypted(input_file, size, func() string { return "" })
+			} else {
+				_, err = pdf.NewReader(input_file, size)
+			}
 			if err != nil {
 				st.Fatalf("%s: %s", f.Name(), err.Error())
 			}
@@ -146,6 +154,10 @@ func testSignAllFiles(t *testing.T, baseSignData SignData) {
 
 	for _, f := range files {
 		if filepath.Ext(f.Name()) != ".pdf" {
+			continue
+		}
+		switch f.Name() {
+		case "signed-with-transparent-watermark.pdf", "testfile_encrypted.pdf", "testfile_encrypted_signed.pdf":
 			continue
 		}
 

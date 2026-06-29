@@ -1,8 +1,11 @@
 .idea
+baseline_errors.txt
+validation_failed.flag
 *.pdf
 *.pdf.*
 !testfile*.pdf
 testfiles/*_signed.pdf
+!testfiles/testfile_encrypted_signed.pdf
 testfiles/failed/*
 testfiles/success/*
 pdfsign
