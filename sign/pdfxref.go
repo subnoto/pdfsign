@@ -2,7 +2,10 @@ package sign
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
+
+	"github.com/digitorus/pdf"
 )
 
 type xrefEntry struct {
@@ -91,16 +94,56 @@ func (context *SignContext) writeXref() error {
 	if _, err := context.OutputBuffer.Write([]byte("\n")); err != nil {
 		return fmt.Errorf("failed to write newline before xref: %w", err)
 	}
+
 	context.NewXrefStart = int64(context.OutputBuffer.Buff.Len())
 
 	switch context.PDFReader.XrefInformation.Type {
 	case "table":
 		return context.writeIncrXrefTable()
 	case "stream":
+		// NewXrefStart is updated inside writeXrefStream after addObject,
+		// which records the exact byte offset of the xref stream object.
 		return context.writeXrefStream()
 	default:
 		return fmt.Errorf("unknown xref type: %s", context.PDFReader.XrefInformation.Type)
 	}
+}
+
+// encryptPdfString encrypts a text string for the given object ID and returns it
+// in PDF syntax. Without encryption: (escaped text). With encryption: <hex of encrypted>.
+func (context *SignContext) encryptPdfString(objID uint32, text string) string {
+	if context.encryption == nil {
+		return pdfString(text)
+	}
+	encrypted, err := context.encryptStreamData(objID, []byte(text))
+	if err != nil {
+		return pdfString(text) // fallback
+	}
+	return "<" + hex.EncodeToString(encrypted) + ">"
+}
+
+// encryptStreamData encrypts stream data for the given object ID if the PDF is encrypted.
+// Returns plaintext unchanged if encryption is not active.
+func (context *SignContext) encryptStreamData(objID uint32, data []byte) ([]byte, error) {
+	if context.encryption == nil {
+		return data, nil
+	}
+	return pdf.EncryptStream(
+		context.encryption.Key,
+		context.encryption.UseAES,
+		context.encryption.EncVersion,
+		objID, 0, data,
+	)
+}
+
+// encryptStreamForNextObject encrypts stream data for the object that will be
+// assigned by the next addObject call.
+func (context *SignContext) encryptStreamForNextObject(data []byte) ([]byte, error) {
+	if context.encryption == nil {
+		return data, nil
+	}
+	nextID := context.getNextObjectID()
+	return context.encryptStreamData(nextID, data)
 }
 
 func (context *SignContext) getLastObjectIDFromXref() (uint32, error) {

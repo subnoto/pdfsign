@@ -57,6 +57,16 @@ func Sign(input io.ReadSeeker, output io.Writer, rdr *pdf.Reader, size int64, si
 		SignatureMaxLengthBase: uint32(hex.EncodedLen(512)),
 	}
 
+	// Initialize encryption context if the PDF is encrypted.
+	// New stream objects must be encrypted with the same key.
+	if key := rdr.EncryptionKey(); key != nil {
+		context.encryption = &EncryptionContext{
+			Key:        key,
+			UseAES:     rdr.UseAES(),
+			EncVersion: rdr.EncVersion(),
+		}
+	}
+
 	// Fetch existing signatures
 	existingSignatures, err := context.fetchExistingSignatures()
 	if err != nil {
@@ -112,20 +122,18 @@ func (context *SignContext) SignPDF() (*common.SignatureInfo, error) {
 			return nil, fmt.Errorf("certificate is required")
 		}
 
+		// NOTE: Go switch cases do NOT fall through. The original code left each
+		// algorithm's first labels with empty bodies, so RSA/ECDSA certs added 0
+		// padding to SignatureMaxLength. A 4096-bit signer then overflowed the
+		// reserved Contents placeholder -> "bytes: negative Repeat count".
 		switch context.SignData.Certificate.SignatureAlgorithm.String() {
-		case "SHA1-RSA":
-		case "ECDSA-SHA1":
-		case "DSA-SHA1":
+		case "SHA1-RSA", "ECDSA-SHA1", "DSA-SHA1":
 			context.SignatureMaxLength += uint32(hex.EncodedLen(128))
-		case "SHA256-RSA":
-		case "ECDSA-SHA256":
-		case "DSA-SHA256":
+		case "SHA256-RSA", "ECDSA-SHA256", "DSA-SHA256":
 			context.SignatureMaxLength += uint32(hex.EncodedLen(256))
-		case "SHA384-RSA":
-		case "ECDSA-SHA384":
+		case "SHA384-RSA", "ECDSA-SHA384":
 			context.SignatureMaxLength += uint32(hex.EncodedLen(384))
-		case "SHA512-RSA":
-		case "ECDSA-SHA512":
+		case "SHA512-RSA", "ECDSA-SHA512":
 			context.SignatureMaxLength += uint32(hex.EncodedLen(512))
 		}
 

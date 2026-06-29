@@ -224,6 +224,13 @@ func (context *SignContext) createImageXObject() ([]byte, []byte, error) {
 		if hasAlpha(img) {
 			compressedAlphaData := compressData(alphaData.Bytes())
 
+			// Encrypt the mask stream data for the mask object (will be placed after the image).
+			// At this point getNextObjectID() returns the image's future ID (N), mask will be N+1.
+			compressedAlphaData, err = context.encryptStreamData(context.getNextObjectID()+1, compressedAlphaData)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to encrypt mask stream: %w", err)
+			}
+
 			// Create and add the soft mask object (same bit depth as image for quality)
 			maskObjectBytes, err = context.createAlphaMask(width, height, compressedAlphaData, bitsPerComponent)
 			if err != nil {
@@ -244,6 +251,12 @@ func (context *SignContext) createImageXObject() ([]byte, []byte, error) {
 		streamPayload = compressData(rgbData.Bytes())
 	default:
 		streamPayload = compressData(rgbData.Bytes())
+	}
+
+	// Encrypt the image stream for the image object (getNextObjectID() predicts its ID).
+	streamPayload, err = context.encryptStreamData(context.getNextObjectID(), streamPayload)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to encrypt image stream: %w", err)
 	}
 
 	imageObject.WriteString(fmt.Sprintf("  /Length %d\n", len(streamPayload)))
@@ -402,9 +415,17 @@ func (context *SignContext) createAppearance(rect [4]float64) ([]byte, error) {
 		drawText(&appearance_stream_buffer, text, fontSize, textX, textY)
 	}
 
-	writeFormTypeAndLength(&appearance_buffer, appearance_stream_buffer.Len())
+	// Encrypt the appearance stream if the PDF is encrypted.
+	// At this point, image/mask objects (if any) have been added, so
+	// getNextObjectID() correctly predicts the appearance XObject's ID.
+	encryptedAppearanceStream, err := context.encryptStreamForNextObject(appearance_stream_buffer.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("failed to encrypt appearance stream: %w", err)
+	}
 
-	writeAppearanceStreamBuffer(&appearance_buffer, appearance_stream_buffer.Bytes())
+	writeFormTypeAndLength(&appearance_buffer, len(encryptedAppearanceStream))
+
+	writeAppearanceStreamBuffer(&appearance_buffer, encryptedAppearanceStream)
 
 	return appearance_buffer.Bytes(), nil
 }

@@ -64,7 +64,8 @@ func pdfString(text string) string {
 	return text
 }
 
-func pdfDateTime(date time.Time) string {
+// formatPdfDateString formats a time.Time into a PDF date string (without PDF string wrapping).
+func formatPdfDateString(date time.Time) string {
 	// Calculate timezone offset from GMT.
 	_, original_offset := date.Zone()
 	offset := original_offset
@@ -90,7 +91,11 @@ func pdfDateTime(date time.Time) string {
 	offset_minutes_formatted := fmt.Sprintf("%d", offset_minutes)
 	dateString += leftPad(offset_hours_formatted, "0", 2-len(offset_hours_formatted)) + "'" + leftPad(offset_minutes_formatted, "0", 2-len(offset_minutes_formatted)) + "'"
 
-	return pdfString(dateString)
+	return dateString
+}
+
+func pdfDateTime(date time.Time) string {
+	return pdfString(formatPdfDateString(date))
 }
 
 func leftPad(s string, padStr string, pLen int) string {

@@ -51,6 +51,10 @@ func (context *SignContext) writeXrefStream() error {
 		return fmt.Errorf("failed to add xref stream object: %w", err)
 	}
 
+	// Use the xref stream object's recorded offset as NewXrefStart.
+	// addObject already computes the correct byte offset for startxref.
+	context.NewXrefStart = context.newXrefEntries[len(context.newXrefEntries)-1].Offset
+
 	return nil
 }
 
@@ -122,6 +126,15 @@ func writeXrefStreamHeader(buffer *bytes.Buffer, context *SignContext, streamLen
 	}
 
 	fmt.Fprintf(buffer, "  /Root %d 0 R\n", context.CatalogData.ObjectId)
+
+	// Preserve /Encrypt from the original trailer so that incremental updates
+	// on encrypted PDFs remain parseable by readers that only inspect the
+	// latest trailer (e.g. @libpdf/core).
+	encrypt := context.PDFReader.Trailer().Key("Encrypt")
+	if !encrypt.IsNull() {
+		encRef := encrypt.GetPtr()
+		fmt.Fprintf(buffer, "  /Encrypt %d %d R\n", encRef.GetID(), encRef.GetGen())
+	}
 
 	if !id.IsNull() {
 		id0 := hex.EncodeToString([]byte(id.Index(0).RawString()))
