@@ -516,7 +516,15 @@ Tests use PDFs under `testfiles/`:
 
 See [`testfiles/generate/README.md`](testfiles/generate/README.md) for the full fixture list.
 
-Signed outputs land in `testfiles/success/` during tests. CI validates those PDFs with [pdfcpu](https://github.com/pdfcpu/pdfcpu) (structure and signature integrity).
+Signed outputs land in `testfiles/success/` during tests. CI validates those PDFs automatically:
+
+```bash
+go test -v ./sign/...                    # generate signed fixtures
+./scripts/validate-signed.sh             # pdfcpu (ISO 32000) + pdfsign verify (RFC 5652/9336)
+./scripts/validate-signed.sh --dss --with-dss-docker   # + EU DSS / ETSI PAdES rules
+```
+
+See [`scripts/README.md`](scripts/README.md) for details, DSS setup, and the manual [ETSI Signature Conformance Checker](https://signatures-conformance-checker.etsi.org/).
 
 ## Development status
 

@@ -28,8 +28,15 @@ const defaultHTTPTimeout = 30 * time.Second
 // package-level http.Get/http.Post helpers which fall back to a (non-functional)
 // native dialer.
 var RevocationHTTPClient = &http.Client{
-	Timeout:   defaultHTTPTimeout,
-	Transport: &http.Transport{Proxy: http.ProxyFromEnvironment},
+	Timeout: defaultHTTPTimeout,
+	Transport: func() http.RoundTripper {
+		if dt, ok := http.DefaultTransport.(*http.Transport); ok {
+			tr := dt.Clone()
+			tr.Proxy = http.ProxyFromEnvironment
+			return tr
+		}
+		return http.DefaultTransport
+	}(),
 }
 
 func embedOCSPRevocationStatus(cert, issuer *x509.Certificate, i *revocation.InfoArchival) error {
@@ -468,7 +475,12 @@ func AddValidationData(pdf []byte, certs []*x509.Certificate, ocsps, crls [][]by
 		for _, run := range dssContiguousRuns(nums) {
 			fmt.Fprintf(&buf, "%d %d\n", run[0], run[1])
 			for k := 0; k < run[1]; k++ {
-				fmt.Fprintf(&buf, "%010d 00000 n\r\n", offsets[run[0]+k])
+				objNum := run[0] + k
+				gen := 0
+				if objNum == rootNum {
+					gen = rootGen
+				}
+				fmt.Fprintf(&buf, "%010d %05d n\r\n", offsets[objNum], gen)
 			}
 		}
 		fmt.Fprintf(&buf, "trailer\n<< /Size %d /Root %d %d R /Prev %s%s%s%s >>\nstartxref\n%d\n%%%%EOF\n",
@@ -493,13 +505,17 @@ func AddValidationData(pdf []byte, certs []*x509.Certificate, ocsps, crls [][]by
 	var bin bytes.Buffer
 	for _, n := range nums {
 		off := offsets[n]
+		gen := uint16(0)
+		if n == rootNum {
+			gen = uint16(rootGen)
+		}
 		bin.WriteByte(1)
 		bin.WriteByte(byte(off >> 24))
 		bin.WriteByte(byte(off >> 16))
 		bin.WriteByte(byte(off >> 8))
 		bin.WriteByte(byte(off))
-		bin.WriteByte(0)
-		bin.WriteByte(0)
+		bin.WriteByte(byte(gen >> 8))
+		bin.WriteByte(byte(gen))
 	}
 	var index strings.Builder
 	for i, run := range dssContiguousRuns(nums) {

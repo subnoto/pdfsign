@@ -2,41 +2,68 @@ package pdf
 
 import (
 	"bytes"
+	"fmt"
 	"sort"
 	"testing"
 )
 
 func TestReaderPage(t *testing.T) {
-	// Mock cross-references
-	xref := []xref{
-		{ptr: objptr{id: 0, gen: 0}}, // 0
-		{ptr: objptr{id: 1, gen: 0}}, // Pages
-		{ptr: objptr{id: 2, gen: 0}}, // Page 1
+	data := minimalCatalogPagePDF()
+	r, err := NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("NewReader failed: %v", err)
 	}
 
-	r := &Reader{
-		xref: xref,
+	if got := r.NumPage(); got != 1 {
+		t.Fatalf("NumPage() = %d, want 1", got)
 	}
 
-	// Mock Trailer with Root -> Pages -> Kid (Page 1)
-	root := Object{Kind: Dict, DictVal: make(map[string]Object)}
-	pages := Object{Kind: Dict, DictVal: make(map[string]Object)}
-	page1 := Object{Kind: Dict, DictVal: make(map[string]Object)}
+	p := r.Page(1)
+	if p.V.IsNull() {
+		t.Fatal("Page(1) returned null page")
+	}
+	if p.V.Key("Type").Name() != "Page" {
+		t.Fatalf("Page(1) Type = %q, want Page", p.V.Key("Type").Name())
+	}
+	mb := p.V.Key("MediaBox")
+	if mb.Kind() != Array || mb.Len() != 4 {
+		t.Fatalf("Page(1) MediaBox = %v, want 4-element array", mb)
+	}
 
-	pages.DictVal["Type"] = Object{Kind: Name, NameVal: "Pages"}
-	pages.DictVal["Count"] = Object{Kind: Integer, Int64Val: 1}
-	pages.DictVal["Kids"] = Object{Kind: Array, ArrayVal: []Object{{Kind: Indirect, PtrVal: objptr{id: 2}}}}
+	missing := r.Page(2)
+	if !missing.V.IsNull() {
+		t.Fatalf("Page(2) should be null, got %#v", missing.V)
+	}
+}
 
-	page1.DictVal["Type"] = Object{Kind: Name, NameVal: "Page"}
-	page1.DictVal["Parent"] = Object{Kind: Indirect, PtrVal: objptr{id: 1}}
+func minimalCatalogPagePDF() []byte {
+	var buf bytes.Buffer
+	offsets := make(map[int]int)
 
-	root.DictVal["Pages"] = Object{Kind: Indirect, PtrVal: objptr{id: 1}}
-	r.trailer = Object{Kind: Dict, DictVal: map[string]Object{"Root": root}}
+	buf.WriteString("%PDF-1.4\n")
 
-	// We need r.GetObject to work for these IDs.
-	// In my refactored Reader, GetObject reads from file.
-	// For testing, I might need to override it or use a real file.
-	// Actually, I can use NewReader on a small buffer if I construct the PDF bytes.
+	offsets[1] = buf.Len()
+	buf.WriteString("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
+
+	offsets[2] = buf.Len()
+	buf.WriteString("2 0 obj\n<< /Type /Pages /Count 1 /Kids [3 0 R] >>\nendobj\n")
+
+	offsets[3] = buf.Len()
+	buf.WriteString("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n")
+
+	xrefPos := buf.Len()
+	buf.WriteString("xref\n0 4\n")
+	buf.WriteString("0000000000 65535 f \n")
+	fmt.Fprintf(&buf, "%010d 00000 n \n", offsets[1])
+	fmt.Fprintf(&buf, "%010d 00000 n \n", offsets[2])
+	fmt.Fprintf(&buf, "%010d 00000 n \n", offsets[3])
+
+	buf.WriteString("trailer\n<< /Size 4 /Root 1 0 R >>\n")
+	buf.WriteString("startxref\n")
+	fmt.Fprintf(&buf, "%d\n", xrefPos)
+	buf.WriteString("%%EOF\n")
+
+	return buf.Bytes()
 }
 
 func TestPageInheritance(t *testing.T) {

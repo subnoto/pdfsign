@@ -33,80 +33,20 @@ jobs:
       - name: Install pdfcpu
         run: go install github.com/pdfcpu/pdfcpu/cmd/pdfcpu@latest
 
-      - name: Run PDF Validation
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Run signed PDF validation (pdfcpu + pdfsign)
         run: |
-          # Ensure pdfcpu is in PATH
-          export PATH=$PATH:$(go env GOPATH)/bin
-          
-          VALIDATION_PASSED="true"
-          echo "### PDF Validation Results"
-          
-          # Use find to handle sign_test.go output in testfiles/success/
-          if [ ! -d "testfiles/success" ] || [ -z "$(ls -A testfiles/success 2>/dev/null)" ]; then
-            echo "⏭️ No signed PDF files found. Skipping validation."
-            exit 0
-          fi
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          chmod +x scripts/validate-signed.sh scripts/dss_validate.py
+          ./scripts/validate-signed.sh
 
-          # Build list of source files that have pre-existing errors (baseline)
-          echo "Running baseline check..."
-          for source_file in testfiles/*.pdf; do
-            [ -e "$source_file" ] || continue
-            filename=$(basename "$source_file")
-            if ! pdfcpu validate -mode strict "$source_file" > /dev/null 2>&1; then
-              echo "$filename" >> baseline_errors.txt
-              echo "Baseline skip: $filename (source has pre-existing errors)"
-            fi
-          done
-
-          # Validate signed files
-          find testfiles/success -name "*.pdf" | sort | while read signed_file; do
-            filename=$(basename "$signed_file")
-            
-            # Extract the original source filename by removing the test suffix
-            # e.g., testfile14_TestSignPDF.pdf -> testfile14.pdf
-            # e.g., testfile14_TestSignPDFVisibleAll.pdf -> testfile14.pdf
-            source_filename=$(echo "$filename" | sed 's/_TestSignPDF.pdf/.pdf/' | sed 's/_TestSignPDFVisibleAll.pdf/.pdf/')
-            
-            # Skip if source had pre-existing errors
-            if [ -f baseline_errors.txt ] && grep -q "^$source_filename$" baseline_errors.txt; then
-              echo "--------------------------------------------------"
-              echo "⏭️  $filename (skipped - source '$source_filename' has pre-existing errors)"
-              continue
-            fi
-            
-            echo "--------------------------------------------------"
-            echo "📄 Validating: $filename"
-            
-            # Structure validation
-            if pdfcpu validate -mode strict "$signed_file" > /dev/null 2>&1; then
-              echo "✅ Structure: OK"
-            else
-              echo "❌ Structure: FAILED"
-              pdfcpu validate -mode strict "$signed_file" 2>&1 || true
-              VALIDATION_PASSED="false"
-              touch validation_failed.flag
-            fi
-            
-            # Signature validation
-            SIG_OUT=$(pdfcpu signatures validate -f "$signed_file" 2>&1)
-            if echo "$SIG_OUT" | grep -q "DocModified: false"; then
-              echo "✅ Signature: Integrity verified (Document not modified)"
-            else
-              echo "❌ Signature: FAILED"
-              echo "$SIG_OUT"
-              VALIDATION_PASSED="false"
-              touch validation_failed.flag
-            fi
-          done
-
-          if [ -f validation_failed.flag ]; then
-            echo ""
-            echo "❌ PDF validation failed. See log above for details."
-            exit 1
-          else
-            echo ""
-            echo "✅ All PDF validations passed!"
-          fi
+      - name: DSS PAdES validation (ETSI via EU DSS)
+        run: |
+          chmod +x scripts/validate-signed.sh scripts/dss_validate.py
+          docker pull ghcr.io/vysmaty/dockerized-dss:latest
+          ./scripts/validate-signed.sh --skip-pdfcpu --skip-verify --with-dss-docker --dss
 
       - name: Upload coverage report
         if: always()

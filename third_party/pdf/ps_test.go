@@ -37,13 +37,10 @@ func TestInterpret(t *testing.T) {
 		}
 	})
 
-	// The program above:
-	// 1. /Key (Value) def -> current dictionary has Key=(Value)
-	// 2. currentdict -> pushes current dict to stack
-	// 3. /Key -> pushes Name(Key) to stack
-	// 4. get -> our do function pops Name and Dict, pushes (Value)
-	// Wait, Interpret handles def, begin, end, dict, currentdict.
-	// So we need to test if they worked.
+	// The program above should result in a single "get" operator invocation.
+	if len(ops) != 1 || ops[0] != "get" {
+		t.Fatalf("expected Interpret to invoke operator %q once, got %v", "get", ops)
+	}
 }
 
 func TestInterpretFull(t *testing.T) {

@@ -1,5 +1,6 @@
 .idea
 baseline_errors.txt
+testfiles/.validate-baseline-errors.txt
 validation_failed.flag
 *.pdf
 *.pdf.*

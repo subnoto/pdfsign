@@ -15,7 +15,7 @@ Added comprehensive support for encrypted PDFs:
 - **AES-256 (v5)**: Support for PDF 2.0 / Extension Level 3 security handlers, including SHA-256 based Key Derivation (KDK) and File Encryption Key (FEK) retrieval.
 
 ### 3. Stability & Error Handling
-- **Panic-Free Design**: Removed legacy `panic` calls in favor of proper Go error propagation.
+- **Panic-Free Design**: Avoid panics at public API boundaries; internal parsing may still use panic+recover on malformed input.
 - **Safe Method Chaining**: The `Value` struct now carries error state, allowing safe nested calls like `doc.Trailer().Key("Root").Key("Pages").Count()`.
 - **Robustness**: Improved recovery from malformed PDF structures and strict parsing errors.
 
