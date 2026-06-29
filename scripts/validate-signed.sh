@@ -135,7 +135,7 @@ source_baseline_skip() {
   for source_file in "$ROOT"/testfiles/*.pdf; do
     [[ -e "$source_file" ]] || continue
     filename=$(basename "$source_file")
-    if ! pdfcpu validate -mode strict "$source_file" >/dev/null 2>&1; then
+    if ! pdfcpu validate --mode strict "$source_file" >/dev/null 2>&1; then
       echo "$filename" >> "$BASELINE_ERRORS"
     fi
   done
@@ -160,11 +160,11 @@ validate_pdfcpu() {
   should_skip_pdf "$signed_file" && return 0
 
   echo "📄 $filename"
-  if pdfcpu validate -mode strict "$signed_file" >/dev/null 2>&1; then
+  if pdfcpu validate --mode strict "$signed_file" >/dev/null 2>&1; then
     echo "  ✅ pdfcpu structure (ISO 32000 strict)"
   else
     echo "  ❌ pdfcpu structure FAILED" >&2
-    pdfcpu validate -mode strict "$signed_file" 2>&1 || true
+    pdfcpu validate --mode strict "$signed_file" 2>&1 || true
     return 1
   fi
 
