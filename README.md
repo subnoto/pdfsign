@@ -3,7 +3,7 @@
 > [!NOTE]
 > This project is a fork of [digitorus/pdfsign](https://github.com/digitorus/pdfsign) with the following changes:
 >
-> This fork includes breaking changes from the original project. It is intended to be used for Subnoto's internal use only. This will be enventually be merged back into the original project once the main refactor of the original project is complete.
+> This fork includes breaking changes from the original project. It is intended to be used for Subnoto's internal use only. This will be eventually be merged back into the original project once the main refactor of the original project is complete.
 
 [![Build & Test](https://github.com/subnoto/pdfsign/workflows/Build%20&%20Test/badge.svg)](https://github.com/subnoto/pdfsign/actions?query=workflow%3Abuild-and-test)
 [![golangci-lint](https://github.com/subnoto/pdfsign/workflows/golangci-lint/badge.svg)](https://github.com/subnoto/pdfsign/actions?query=workflow%3Agolangci-lint)
@@ -360,8 +360,11 @@ err = sign.Sign(inputFile, outputFile, rdr, size, sign.SignData{
         Image:       signatureImage,
         // ImageAsWatermark: true, // Optional: draw text over image
         // SignerUID: "user@example.com",     // Optional: fill AcroForm initials/date fields
-        // DateFormat: "02.01.2006 15:04",      // Optional: Go time layout for date fields
-        // Locale: "fr-FR",                     // Optional: locale for date when DateFormat empty
+        // Timezone: "Europe/Paris",          // Optional: IANA timezone for date fields
+        // DateFormat: "02.01.2006 15:04",    // Optional: Go time layout for date fields
+        // DateStyle: sign.DateStyleHuman,    // Optional: numeric, date-only, long, human
+        // DateOmitTime: true,                // Optional: omit time from long/human styles
+        // Locale: "fr-FR",                   // Optional: locale for date when DateFormat empty
     },
     DigestAlgorithm: crypto.SHA512,
     Signer:          privateKey,
@@ -378,12 +381,49 @@ When the PDF contains AcroForm text fields whose names follow specific patterns,
     - **Initials**: `initials_page_${pageIndex}_signer_${signer_uid}`
     - **Date**: `date_id_${id}_signer_${signer_uid}`
 
-The **date** is formatted with the signature time (date, time, and timezone). You can control the format in two ways:
+The **date** is formatted with the signature time. Format resolution priority:
 
-| Field            | Description                                                                                                                                                                                                          |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`DateFormat`** | Optional. [Go time layout](https://pkg.go.dev/time#Time.Format) for the date+time part (e.g. `"02.01.2006 15:04"`). Timezone is always appended; UTC is shown as **UTC** (not `+00:00`).                             |
-| **`Locale`**     | Optional. BCP 47-style tag (e.g. `"en-US"`, `"fr-FR"`, `"de-DE"`). Used only when `DateFormat` is empty; picks a predefined layout for that locale. When both are empty, the default is US-style `01/02/2006 15:04`. |
+1. **`DateFormat`** — custom [Go time layout](https://pkg.go.dev/time#Time.Format) (overrides all presets)
+2. **`DateStyle`** + **`Locale`** — predefined style for the locale
+3. **`Locale`** only — numeric layout for that locale (backward compatible)
+4. Default — US-style numeric `01/02/2006 15:04`
+
+| Field              | Description                                                                                                                                                                                                |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`Timezone`**     | Optional. IANA location name (e.g. `"Europe/Paris"`, `"America/New_York"`). Converts the signature date to this zone before formatting. Invalid values cause signing to fail.                              |
+| **`DateFormat`**   | Optional. Go time layout for the date part (e.g. `"02.01.2006 15:04"`). Timezone abbreviation is still appended.                                                                                           |
+| **`DateStyle`**    | Optional preset when `DateFormat` is empty: `DateStyleNumeric` (default), `DateStyleDateOnly`, `DateStyleLong`, `DateStyleHuman`.                                                                          |
+| **`DateOmitTime`** | Optional. When `true`, `DateStyleLong` and `DateStyleHuman` omit the time (e.g. `"15 janvier 2024"` instead of `"15 janvier 2024 à 14:30"`). No effect on numeric or date-only styles.                     |
+| **`Locale`**       | Optional. BCP 47-style tag (e.g. `"en-US"`, `"fr-FR"`, `"de-DE"`). Controls numeric date order and localized month names for long/human styles. When both `DateFormat` and `Locale` are empty, US default. |
+
+**Examples**
+
+```go
+// dd/mm/yyyy with Paris timezone
+Appearance: sign.Appearance{
+    SignerUID: "user@example.com",
+    Timezone:  "Europe/Paris",
+    Locale:    "fr-FR",
+}
+
+// Human-readable French, date only (no time)
+Appearance: sign.Appearance{
+    SignerUID:    "user@example.com",
+    Timezone:     "Europe/Paris",
+    Locale:       "fr-FR",
+    DateStyle:    sign.DateStyleHuman,
+    DateOmitTime: true,
+}
+
+// Human-readable English with time
+Appearance: sign.Appearance{
+    SignerUID: "user@example.com",
+    Locale:    "en-US",
+    DateStyle: sign.DateStyleHuman,
+}
+```
+
+Timezone is appended using the zone abbreviation when available (e.g. `CET`, `EST`); UTC is shown as **UTC**; otherwise a numeric offset (`+01:00`) is used.
 
 Date fields are rendered with a slightly larger font than other filled text fields for readability.
 
