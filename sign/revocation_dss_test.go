@@ -81,7 +81,7 @@ func TestAddValidationData(t *testing.T) {
 			t.Fatalf("AddValidationData: %v", err)
 		}
 		s := string(out)
-		for _, want := range []string{"/Type /DSS", "/Certs", "/DSS", "startxref"} {
+		for _, want := range []string{"/Type /DSS", "/Certs", "/DSS", "startxref", "/VRI"} {
 			if !strings.Contains(s, want) {
 				t.Fatalf("missing %q in output", want)
 			}
@@ -166,6 +166,49 @@ func TestSignLTV(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "/Type /DSS") {
 		t.Fatalf("SignLTV output missing DSS: len=%d", out.Len())
+	}
+	if !strings.Contains(out.String(), "/VRI") {
+		t.Fatal("SignLTV output missing /VRI dictionary")
+	}
+}
+
+func TestSignLTVEncryptedPDF(t *testing.T) {
+	cert, key := loadCertificateAndKey(t)
+	inputPath := "../testfiles/testfile_encrypted.pdf"
+	input, err := os.Open(inputPath)
+	if err != nil {
+		t.Skipf("encrypted fixture missing: %v", err)
+	}
+	defer func() { _ = input.Close() }()
+	finfo, err := input.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rdr, err := pdf.NewReaderEncrypted(input, finfo.Size(), func() string { return "" })
+	if err != nil {
+		t.Fatalf("NewReaderEncrypted: %v", err)
+	}
+
+	var out bytes.Buffer
+	_, err = SignLTV(input, &out, rdr, finfo.Size(), SignData{
+		Signature: SignDataSignature{
+			Info:     SignDataSignatureInfo{Name: "Encrypted LTV"},
+			CertType: ApprovalSignature,
+		},
+		DigestAlgorithm:    crypto.SHA256,
+		Signer:             key,
+		Certificate:        cert,
+		CertificateChains:  [][]*x509.Certificate{{cert}},
+		RevocationFunction: mockRevocationFunction,
+	})
+	if err != nil {
+		t.Fatalf("SignLTV encrypted: %v", err)
+	}
+	s := out.String()
+	for _, want := range []string{"/Type /DSS", "/VRI", "/Encrypt"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("encrypted LTV output missing %q", want)
+		}
 	}
 }
 

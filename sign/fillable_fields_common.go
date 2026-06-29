@@ -106,6 +106,15 @@ func (context *SignContext) createTextFieldAppearance(text string, rect [4]float
 	stream.WriteString("Q\n")                                       // Restore graphics state
 
 	// Create XObject dictionary
+	streamBytes := stream.Bytes()
+	if context.encryption != nil {
+		encrypted, err := context.encryptStreamForNextObject(streamBytes)
+		if err != nil {
+			return nil, fmt.Errorf("encrypt field appearance stream: %w", err)
+		}
+		streamBytes = encrypted
+	}
+
 	var xobj bytes.Buffer
 	xobj.WriteString("<<\n")
 	xobj.WriteString("  /Type /XObject\n")
@@ -120,10 +129,10 @@ func (context *SignContext) createTextFieldAppearance(text string, rect [4]float
 	xobj.WriteString("      >>\n")
 	xobj.WriteString("    >>\n")
 	xobj.WriteString("  >>\n")
-	xobj.WriteString(fmt.Sprintf("  /Length %d\n", stream.Len()))
+	xobj.WriteString(fmt.Sprintf("  /Length %d\n", len(streamBytes)))
 	xobj.WriteString(">>\n")
 	xobj.WriteString("stream\n")
-	xobj.Write(stream.Bytes())
+	xobj.Write(streamBytes)
 	xobj.WriteString("\nendstream\n")
 
 	return xobj.Bytes(), nil
@@ -227,6 +236,7 @@ func getFieldRect(field pdf.Value) [4]float64 {
 // appearanceFontScale is applied when building the appearance stream (0 = no scaling).
 func (context *SignContext) updateFieldObject(field pdf.Value, value string, makeReadOnly bool, appearanceFontScale float64) error {
 	ptr := field.GetPtr()
+	fieldObjID := uint32(ptr.GetID())
 	if ptr.GetID() == 0 {
 		// Direct object, skip parent update
 	} else {
@@ -271,13 +281,23 @@ func (context *SignContext) updateFieldObject(field pdf.Value, value string, mak
 			case "T":
 				tVal := field.Key("T").RawString()
 				asciiT := decodeFieldName(tVal)
-				buf.WriteString(pdfString(asciiT))
+				tStr, err := context.encryptPdfString(fieldObjID, asciiT)
+				if err != nil {
+					return err
+				}
+				buf.WriteString(tStr)
 			case "DA":
 				// normalize appearance default string
 				daVal := field.Key("DA").RawString()
-				buf.WriteString(pdfString(normalizeDA(daVal)))
+				daStr, err := context.encryptPdfString(fieldObjID, normalizeDA(daVal))
+				if err != nil {
+					return err
+				}
+				buf.WriteString(daStr)
 			default:
-				context.serializeCatalogEntry(&buf, ptr.GetID(), field.Key(key))
+				if err := context.serializeCatalogEntry(&buf, fieldObjID, field.Key(key), fieldObjID); err != nil {
+					return err
+				}
 			}
 			buf.WriteString("\n")
 		}
@@ -293,11 +313,19 @@ func (context *SignContext) updateFieldObject(field pdf.Value, value string, mak
 
 		// Set new value
 		buf.WriteString(" /V ")
-		buf.WriteString(pdfString(value))
+		vStr, err := context.encryptPdfString(fieldObjID, value)
+		if err != nil {
+			return err
+		}
+		buf.WriteString(vStr)
 		buf.WriteString("\n")
 		// Set appearance state to match value for proper rendering
 		buf.WriteString(" /AS ")
-		buf.WriteString(pdfString(value))
+		asStr, err := context.encryptPdfString(fieldObjID, value)
+		if err != nil {
+			return err
+		}
+		buf.WriteString(asStr)
 		buf.WriteString("\n")
 		buf.WriteString(">>\n")
 
@@ -317,6 +345,7 @@ func (context *SignContext) updateFieldObject(field pdf.Value, value string, mak
 			if kptr.GetID() == 0 {
 				continue
 			}
+			kidObjID := uint32(kptr.GetID())
 
 			var kbuf bytes.Buffer
 			kbuf.WriteString("<<\n")
@@ -363,12 +392,22 @@ func (context *SignContext) updateFieldObject(field pdf.Value, value string, mak
 				case "T":
 					tVal := kid.Key("T").RawString()
 					asciiT := decodeFieldName(tVal)
-					kbuf.WriteString(pdfString(asciiT))
+					tStr, err := context.encryptPdfString(kidObjID, asciiT)
+					if err != nil {
+						return err
+					}
+					kbuf.WriteString(tStr)
 				case "DA":
 					daVal := kid.Key("DA").RawString()
-					kbuf.WriteString(pdfString(normalizeDA(daVal)))
+					daStr, err := context.encryptPdfString(kidObjID, normalizeDA(daVal))
+					if err != nil {
+						return err
+					}
+					kbuf.WriteString(daStr)
 				default:
-					context.serializeCatalogEntry(&kbuf, kptr.GetID(), kid.Key(kkey))
+					if err := context.serializeCatalogEntry(&kbuf, kidObjID, kid.Key(kkey), kidObjID); err != nil {
+						return err
+					}
 				}
 				kbuf.WriteString("\n")
 			}
@@ -382,11 +421,19 @@ func (context *SignContext) updateFieldObject(field pdf.Value, value string, mak
 			}
 
 			kbuf.WriteString(" /V ")
-			kbuf.WriteString(pdfString(value))
+			kvStr, err := context.encryptPdfString(kidObjID, value)
+			if err != nil {
+				return err
+			}
+			kbuf.WriteString(kvStr)
 			kbuf.WriteString("\n")
 			// Set appearance state to match value for proper rendering
 			kbuf.WriteString(" /AS ")
-			kbuf.WriteString(pdfString(value))
+			kasStr, err := context.encryptPdfString(kidObjID, value)
+			if err != nil {
+				return err
+			}
+			kbuf.WriteString(kasStr)
 			kbuf.WriteString("\n")
 			kbuf.WriteString(">>\n")
 

@@ -4,6 +4,7 @@ import (
 	"crypto"
 	"crypto/x509"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,9 +12,12 @@ import (
 	"github.com/digitorus/pdf"
 	"github.com/digitorus/pkcs7"
 	"github.com/subnoto/pdfsign/common"
+	"github.com/subnoto/pdfsign/revocation"
 
 	"github.com/mattetti/filebuffer"
 )
+
+const maxSignatureBufferRetries = 8
 
 func SignFile(input string, output string, sign_data SignData) (*common.SignatureInfo, error) {
 	input_file, err := os.Open(input)
@@ -83,6 +87,37 @@ func Sign(input io.ReadSeeker, output io.Writer, rdr *pdf.Reader, size int64, si
 }
 
 func (context *SignContext) SignPDF() (*common.SignatureInfo, error) {
+	for attempt := 0; attempt < maxSignatureBufferRetries; attempt++ {
+		info, err := context.signPDFOnce()
+		if err == nil {
+			return info, nil
+		}
+		if !errors.Is(err, errSignatureBufferTooSmall) {
+			return nil, err
+		}
+		context.resetIncrementalState()
+	}
+	return nil, fmt.Errorf("signature buffer too small after %d retries", maxSignatureBufferRetries)
+}
+
+// resetIncrementalState clears mutable signing state before a buffer-size retry so
+// object IDs, xref tables, and computed hashes are rebuilt from scratch.
+func (context *SignContext) resetIncrementalState() {
+	context.lastXrefID = 0
+	context.newXrefEntries = nil
+	context.updatedXrefEntries = nil
+	context.NewXrefStart = 0
+	context.ByteRangeValues = nil
+	context.CatalogData = CatalogData{}
+	context.VisualSignData = VisualSignData{}
+	context.InfoData = InfoData{}
+	context.computedDocumentHash = ""
+	context.computedSignatureHash = ""
+	context.computedTimeStamp = nil
+	context.SignData.RevocationData = revocation.InfoArchival{}
+}
+
+func (context *SignContext) signPDFOnce() (*common.SignatureInfo, error) {
 	// set defaults
 	if context.SignData.Signature.CertType == 0 {
 		context.SignData.Signature.CertType = 1
@@ -191,7 +226,10 @@ func (context *SignContext) SignPDF() (*common.SignatureInfo, error) {
 	case TimeStampSignature:
 		signature_object = context.createTimestampPlaceholder()
 	default:
-		signature_object = context.createSignaturePlaceholder()
+		signature_object, err = context.createSignaturePlaceholder()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create signature placeholder: %w", err)
+		}
 	}
 
 	// Write the new signature object
@@ -277,6 +315,9 @@ func (context *SignContext) SignPDF() (*common.SignatureInfo, error) {
 
 	// Replace signature
 	if err := context.replaceSignature(); err != nil {
+		if errors.Is(err, errSignatureBufferTooSmall) {
+			return nil, errSignatureBufferTooSmall
+		}
 		return nil, fmt.Errorf("failed to replace signature: %w", err)
 	}
 

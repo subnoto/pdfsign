@@ -45,7 +45,9 @@ func (context *SignContext) createCatalog() ([]byte, error) {
 	for _, key := range root.Keys() {
 		if key != "Type" && key != "AcroForm" {
 			_, _ = fmt.Fprintf(&catalog_buffer, "  /%s ", key)
-			context.serializeCatalogEntry(&catalog_buffer, rootPtr.GetID(), root.Key(key), catalogObjID)
+			if err := context.serializeCatalogEntry(&catalog_buffer, rootPtr.GetID(), root.Key(key), catalogObjID); err != nil {
+				return nil, err
+			}
 			catalog_buffer.WriteString("\n")
 		}
 	}
@@ -85,7 +87,9 @@ func (context *SignContext) createCatalog() ([]byte, error) {
 						catalog_buffer.WriteString(" R")
 					} else {
 						// Direct value
-						context.serializeCatalogEntry(&catalog_buffer, rootPtr.GetID(), v, catalogObjID)
+						if err := context.serializeCatalogEntry(&catalog_buffer, rootPtr.GetID(), v, catalogObjID); err != nil {
+							return nil, err
+						}
 					}
 				}
 
@@ -109,9 +113,15 @@ func (context *SignContext) createCatalog() ([]byte, error) {
 				// Ensure DA is written as a string
 				_, _ = fmt.Fprintf(&catalog_buffer, "    /%s ", key)
 				if daValue.Kind() == pdf.String {
-					_, _ = fmt.Fprint(&catalog_buffer, context.encryptPdfString(catalogObjID, daValue.RawString()))
+					daStr, err := context.encryptPdfString(catalogObjID, daValue.RawString())
+					if err != nil {
+						return nil, err
+					}
+					_, _ = fmt.Fprint(&catalog_buffer, daStr)
 				} else {
-					context.serializeCatalogEntry(&catalog_buffer, rootPtr.GetID(), daValue, catalogObjID)
+					if err := context.serializeCatalogEntry(&catalog_buffer, rootPtr.GetID(), daValue, catalogObjID); err != nil {
+						return nil, err
+					}
 				}
 				catalog_buffer.WriteString("\n")
 				continue
@@ -119,7 +129,9 @@ func (context *SignContext) createCatalog() ([]byte, error) {
 
 			// Copy other AcroForm entries as-is.
 			_, _ = fmt.Fprintf(&catalog_buffer, "    /%s ", key)
-			context.serializeCatalogEntry(&catalog_buffer, rootPtr.GetID(), acro.Key(key), catalogObjID)
+			if err := context.serializeCatalogEntry(&catalog_buffer, rootPtr.GetID(), acro.Key(key), catalogObjID); err != nil {
+				return nil, err
+			}
 			catalog_buffer.WriteString("\n")
 		}
 
@@ -203,18 +215,22 @@ func (context *SignContext) createCatalog() ([]byte, error) {
 
 // serializeCatalogEntry takes a pdf.Value and serializes it to the given writer.
 // targetObjID is the object ID of the object being written, used for string encryption.
-func (context *SignContext) serializeCatalogEntry(w io.Writer, rootObjId uint32, value pdf.Value, targetObjID ...uint32) {
+func (context *SignContext) serializeCatalogEntry(w io.Writer, rootObjId uint32, value pdf.Value, targetObjID ...uint32) error {
 	if ptr := value.GetPtr(); ptr.GetID() != rootObjId {
 		// Indirect object
 		_, _ = fmt.Fprintf(w, "%d %d R", ptr.GetID(), ptr.GetGen())
-		return
+		return nil
 	}
 
 	// Direct object
 	switch value.Kind() {
 	case pdf.String:
 		if context.encryption != nil && len(targetObjID) > 0 {
-			_, _ = fmt.Fprint(w, context.encryptPdfString(targetObjID[0], value.RawString()))
+			encStr, err := context.encryptPdfString(targetObjID[0], value.RawString())
+			if err != nil {
+				return err
+			}
+			_, _ = fmt.Fprint(w, encStr)
 		} else {
 			_, _ = fmt.Fprintf(w, "(%s)", value.RawString())
 		}
@@ -239,7 +255,9 @@ func (context *SignContext) serializeCatalogEntry(w io.Writer, rootObjId uint32,
 				_, _ = fmt.Fprint(w, " ") // Space between items
 			}
 			_, _ = fmt.Fprintf(w, "/%s ", key)
-			context.serializeCatalogEntry(w, rootObjId, value.Key(key), targetObjID...)
+			if err := context.serializeCatalogEntry(w, rootObjId, value.Key(key), targetObjID...); err != nil {
+				return err
+			}
 		}
 		_, _ = fmt.Fprint(w, ">>")
 	case pdf.Array:
@@ -248,10 +266,13 @@ func (context *SignContext) serializeCatalogEntry(w io.Writer, rootObjId uint32,
 			if idx > 0 {
 				_, _ = fmt.Fprint(w, " ") // Space between items
 			}
-			context.serializeCatalogEntry(w, rootObjId, value.Index(idx), targetObjID...)
+			if err := context.serializeCatalogEntry(w, rootObjId, value.Index(idx), targetObjID...); err != nil {
+				return err
+			}
 		}
 		_, _ = fmt.Fprint(w, "]")
 	case pdf.Stream:
 		panic("stream cannot be a direct object")
 	}
+	return nil
 }

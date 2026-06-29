@@ -96,12 +96,18 @@ func TestEncryptPdfString(t *testing.T) {
 		},
 	}
 
-	plain := ctx.encryptPdfString(99, "test")
+	plain, err := ctx.encryptPdfString(99, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.HasPrefix(plain, "<") || !strings.HasSuffix(plain, ">") {
 		t.Fatalf("encrypted string should be hex-wrapped, got %q", plain)
 	}
 
-	noEnc := (&SignContext{}).encryptPdfString(99, "test")
+	noEnc, err := (&SignContext{}).encryptPdfString(99, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if noEnc != pdfString("test") {
 		t.Fatalf("without encryption expected pdfString, got %q", noEnc)
 	}
@@ -219,7 +225,11 @@ func TestEncryptedSignaturePlaceholder(t *testing.T) {
 		}
 	}
 
-	placeholder := string(ctx.createSignaturePlaceholder())
+	placeholderBytes, err := ctx.createSignaturePlaceholder()
+	if err != nil {
+		t.Fatal(err)
+	}
+	placeholder := string(placeholderBytes)
 	if strings.Contains(placeholder, "(Encrypted Signer)") {
 		t.Fatalf("placeholder /Name must be encrypted:\n%s", placeholder)
 	}

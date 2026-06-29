@@ -1711,7 +1711,7 @@ func TestSignVerifyHashConsistency(t *testing.T) {
 
 	// Signature hash comparison - comparing how sign vs verify compute signature hashes
 	if signatureInfo.SignatureHash != verifyInfo.SignatureHash {
-		t.Logf("Signature hash difference (may need further investigation):\n  Sign:   %s\n  Verify: %s",
+		t.Errorf("Signature hash mismatch:\n  Sign:   %s\n  Verify: %s",
 			signatureInfo.SignatureHash, verifyInfo.SignatureHash)
 	} else {
 		t.Logf("✅ Signature hashes match: %s", signatureInfo.SignatureHash)
@@ -1756,5 +1756,40 @@ func TestSignVerifyHashConsistency(t *testing.T) {
 
 	if signatureInfo.ContactInfo != verifyInfo.ContactInfo {
 		t.Errorf("ContactInfo mismatch: sign='%s', verify='%s'", signatureInfo.ContactInfo, verifyInfo.ContactInfo)
+	}
+}
+
+func TestSuccessFixturesConformance(t *testing.T) {
+	dir := "../testfiles/success"
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Skip("testfiles/success not present")
+	}
+	var files []string
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) != ".pdf" {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		info, err := os.Stat(path)
+		if err != nil || info.Size() == 0 {
+			continue
+		}
+		files = append(files, path)
+	}
+	if len(files) == 0 {
+		t.Skip("no non-empty signed PDFs in testfiles/success (run with -v)")
+	}
+	for _, path := range files {
+		base := filepath.Base(path)
+		t.Run(base, func(t *testing.T) {
+			assertPAdESSignatureObjects(t, openPDFReader(t, path))
+			switch {
+			case strings.Contains(base, "_TestSignLTA"):
+				assertLTAPDFMarkers(t, path)
+			case strings.Contains(base, "_TestSignLTV"):
+				assertLTVPDFMarkers(t, path)
+			}
+		})
 	}
 }

@@ -1,13 +1,16 @@
 .idea
 baseline_errors.txt
+testfiles/.validate-baseline-errors.txt
 validation_failed.flag
 *.pdf
 *.pdf.*
 !testfile*.pdf
+!testfiles/gen_*.pdf
 testfiles/*_signed.pdf
 !testfiles/testfile_encrypted_signed.pdf
 testfiles/failed/*
 testfiles/success/*
+testfiles/generate/.venv/
 pdfsign
 certs/*
 tmp/
