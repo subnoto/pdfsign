@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"strconv"
 
 	"github.com/digitorus/pdf"
 )
@@ -47,7 +49,7 @@ func (context *SignContext) addObject(object []byte) (uint32, error) {
 		Offset: int64(context.OutputBuffer.Buff.Len()) + 1,
 	})
 
-	err := context.writeObject(objectID, object)
+	err := context.writeObject(objectID, 0, object)
 	if err != nil {
 		return 0, fmt.Errorf("failed to write object: %w", err)
 	}
@@ -56,12 +58,14 @@ func (context *SignContext) addObject(object []byte) (uint32, error) {
 }
 
 func (context *SignContext) updateObject(id uint32, object []byte) error {
+	gen := context.latestObjectGeneration(id) + 1
 	context.updatedXrefEntries = append(context.updatedXrefEntries, xrefEntry{
-		ID:     id,
-		Offset: int64(context.OutputBuffer.Buff.Len()) + 1,
+		ID:         id,
+		Offset:     int64(context.OutputBuffer.Buff.Len()) + 1,
+		Generation: gen,
 	})
 
-	err := context.writeObject(id, object)
+	err := context.writeObject(id, gen, object)
 	if err != nil {
 		return fmt.Errorf("failed to write object: %w", err)
 	}
@@ -69,9 +73,70 @@ func (context *SignContext) updateObject(id uint32, object []byte) error {
 	return nil
 }
 
-func (context *SignContext) writeObject(id uint32, object []byte) error {
+func (context *SignContext) latestObjectGeneration(id uint32) int {
+	maxGen := 0
+	if context.PDFReader != nil {
+		for _, entry := range context.PDFReader.Xref() {
+			ptr := entry.Ptr()
+			if ptr.GetID() == id && int(ptr.GetGen()) > maxGen {
+				maxGen = int(ptr.GetGen())
+			}
+		}
+	}
+
+	// digitorus/pdf does not always merge generation numbers from incremental
+	// xref updates for objects that already exist; scan the PDF bytes for the
+	// highest "id gen obj" header.
+	if context.OutputBuffer != nil && context.OutputBuffer.Buff.Len() > 0 {
+		maxGen = max(maxGen, highestObjectGenerationInPDF(context.OutputBuffer.Buff.Bytes(), id))
+	} else if context.InputFile != nil {
+		cur, err := context.InputFile.Seek(0, io.SeekCurrent)
+		if err == nil {
+			if _, err := context.InputFile.Seek(0, io.SeekStart); err == nil {
+				if data, err := io.ReadAll(context.InputFile); err == nil {
+					maxGen = max(maxGen, highestObjectGenerationInPDF(data, id))
+				}
+				_, _ = context.InputFile.Seek(cur, io.SeekStart)
+			}
+		}
+	}
+
+	for _, entry := range context.updatedXrefEntries {
+		if entry.ID == id && entry.Generation > maxGen {
+			maxGen = entry.Generation
+		}
+	}
+
+	return maxGen
+}
+
+func highestObjectGenerationInPDF(data []byte, id uint32) int {
+	maxGen := 0
+	prefix := []byte(fmt.Sprintf("\n%d ", id))
+	searchFrom := 0
+	for {
+		idx := bytes.Index(data[searchFrom:], prefix)
+		if idx < 0 {
+			break
+		}
+		pos := searchFrom + idx + len(prefix)
+		end := pos
+		for end < len(data) && data[end] >= '0' && data[end] <= '9' {
+			end++
+		}
+		if end > pos && end+4 <= len(data) && bytes.Equal(data[end:end+4], []byte(" obj")) {
+			if gen, err := strconv.Atoi(string(data[pos:end])); err == nil && gen > maxGen {
+				maxGen = gen
+			}
+		}
+		searchFrom = pos + 1
+	}
+	return maxGen
+}
+
+func (context *SignContext) writeObject(id uint32, generation int, object []byte) error {
 	// Write the object header
-	if _, err := fmt.Fprintf(context.OutputBuffer, "\n%d 0 obj\n", id); err != nil {
+	if _, err := fmt.Fprintf(context.OutputBuffer, "\n%d %d obj\n", id, generation); err != nil {
 		return fmt.Errorf("failed to write object header: %w", err)
 	}
 

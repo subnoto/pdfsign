@@ -18,7 +18,7 @@ func TestWriteXrefStreamLine(t *testing.T) {
 		name     string
 		xreftype byte
 		offset   int
-		gen      byte
+		gen      uint16
 		expected []byte
 	}{
 		{
@@ -26,21 +26,28 @@ func TestWriteXrefStreamLine(t *testing.T) {
 			xreftype: 1,
 			offset:   1234,
 			gen:      0,
-			expected: []byte{1, 0, 0, 4, 210, 0},
+			expected: []byte{1, 0, 0, 4, 210, 0, 0},
 		},
 		{
 			name:     "zero entry",
 			xreftype: 0,
 			offset:   0,
 			gen:      0,
-			expected: []byte{0, 0, 0, 0, 0, 0},
+			expected: []byte{0, 0, 0, 0, 0, 0, 0},
 		},
 		{
 			name:     "max offset",
 			xreftype: 1,
 			offset:   16777215, // 2^24 - 1
 			gen:      255,
-			expected: []byte{1, 0, 255, 255, 255, 255},
+			expected: []byte{1, 0, 255, 255, 255, 0, 255},
+		},
+		{
+			name:     "generation above 255",
+			xreftype: 1,
+			offset:   100,
+			gen:      256,
+			expected: []byte{1, 0, 0, 0, 100, 1, 0},
 		},
 	}
 
@@ -176,6 +183,29 @@ func TestEncodePNGUPBytes(t *testing.T) {
 	}
 }
 
+func TestValidateXrefStreamGeneration(t *testing.T) {
+	gen, err := validateXrefStreamGeneration(65535)
+	if err != nil || gen != 65535 {
+		t.Fatalf("65535: gen=%d err=%v", gen, err)
+	}
+	if _, err := validateXrefStreamGeneration(-1); err == nil {
+		t.Fatal("expected error for negative generation")
+	}
+	if _, err := validateXrefStreamGeneration(65536); err == nil {
+		t.Fatal("expected error for generation > 65535")
+	}
+}
+
+func TestWriteXrefStreamEntriesRejectsOutOfRangeGeneration(t *testing.T) {
+	var buf bytes.Buffer
+	err := writeXrefStreamEntries(&buf, &SignContext{
+		updatedXrefEntries: []xrefEntry{{ID: 1, Offset: 10, Generation: 65536}},
+	})
+	if err == nil {
+		t.Fatal("expected error for out-of-range generation")
+	}
+}
+
 func TestWriteXrefStream(t *testing.T) {
 	input_file, err := os.Open("../testfiles/testfile12.pdf")
 	if err != nil {
@@ -219,7 +249,7 @@ func TestWriteXrefStream(t *testing.T) {
 	requiredElements := []string{
 		"/Type /XRef",
 		"/Filter /FlateDecode",
-		"/W [ 1 4 1 ]",
+		"/W [ 1 4 2 ]",
 		"stream\n",
 		"endstream",
 	}

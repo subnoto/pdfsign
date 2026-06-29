@@ -11,12 +11,16 @@ func (context *SignContext) updateByteRange() error {
 		return err
 	}
 
-	// Set ByteRangeValues by looking for the /Contents< filled with zeros
-	contentsPlaceholder := bytes.Repeat([]byte("0"), int(context.SignatureMaxLength))
-	contentsIndex := bytes.Index(context.OutputBuffer.Buff.Bytes(), contentsPlaceholder)
+	// Locate the new signature's /Contents placeholder. Use the last match
+	// anchored to "/Contents<" so we do not pick zero padding from a prior
+	// signature when re-signing incrementally.
+	bufferBytes := context.OutputBuffer.Buff.Bytes()
+	contentsMarker := append([]byte("/Contents<"), bytes.Repeat([]byte("0"), int(context.SignatureMaxLength))...)
+	contentsIndex := bytes.LastIndex(bufferBytes, contentsMarker)
 	if contentsIndex == -1 {
 		return fmt.Errorf("failed to find contents placeholder")
 	}
+	contentsIndex += len("/Contents<")
 
 	// Calculate ByteRangeValues
 	signatureContentsStart := int64(contentsIndex) - 1
@@ -37,14 +41,13 @@ func (context *SignContext) updateByteRange() error {
 		return fmt.Errorf("new byte range string is the same lenght as the placeholder")
 	}
 
-	// Find the placeholder in the buffer
-	placeholderIndex := bytes.Index(context.OutputBuffer.Buff.Bytes(), []byte(signatureByteRangePlaceholder))
+	// Find the placeholder for the signature being written (last in buffer).
+	placeholderIndex := bytes.LastIndex(bufferBytes, []byte(signatureByteRangePlaceholder))
 	if placeholderIndex == -1 {
 		return fmt.Errorf("failed to find ByteRange placeholder")
 	}
 
 	// Replace the placeholder with the new byte range
-	bufferBytes := context.OutputBuffer.Buff.Bytes()
 	copy(bufferBytes[placeholderIndex:placeholderIndex+len(new_byte_range)], []byte(new_byte_range))
 
 	// Rewrite the buffer with the updated bytes

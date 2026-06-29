@@ -18,7 +18,7 @@ func (context *SignContext) writeIncrXrefTable() error {
 			return fmt.Errorf("failed to write updated xref object: %w", err)
 		}
 
-		xrefLine := fmt.Sprintf("%010d 00000 n\r\n", entry.Offset)
+		xrefLine := fmt.Sprintf("%010d %05d n\r\n", entry.Offset, entry.Generation)
 		if _, err := context.OutputBuffer.Write([]byte(xrefLine)); err != nil {
 			return fmt.Errorf("failed to write updated incremental xref entry: %w", err)
 		}

@@ -18,6 +18,10 @@ import (
 
 // processSignature processes a single digital signature found in the PDF.
 func processSignature(v pdf.Value, file io.ReaderAt, options *VerifyOptions) (common.SignatureInfo, SignatureValidation, string, error) {
+	if isDocTimeStamp(v) {
+		return processDocTimeStamp(v, file)
+	}
+
 	info := common.SignatureInfo{
 		Name:        v.Key("Name").Text(),
 		Reason:      v.Key("Reason").Text(),
@@ -84,22 +88,67 @@ func processSignature(v pdf.Value, file io.ReaderAt, options *VerifyOptions) (co
 	return info, validation, certError, nil
 }
 
+func isDocTimeStamp(v pdf.Value) bool {
+	if v.Key("Type").Name() == "DocTimeStamp" {
+		return true
+	}
+	return v.Key("SubFilter").Name() == "ETSI.RFC3161"
+}
+
+func readSignatureByteRange(v pdf.Value, file io.ReaderAt) ([]byte, error) {
+	br := v.Key("ByteRange")
+	if br.IsNull() || br.Len() < 4 {
+		return nil, fmt.Errorf("missing or invalid ByteRange")
+	}
+	var content []byte
+	for i := 0; i < br.Len(); i++ {
+		i++
+		part, err := io.ReadAll(io.NewSectionReader(file, br.Index(i-1).Int64(), br.Index(i).Int64()))
+		if err != nil {
+			return nil, fmt.Errorf("failed to read byte range %d: %w", i, err)
+		}
+		content = append(content, part...)
+	}
+	return content, nil
+}
+
+// processDocTimeStamp validates a PAdES document timestamp (/Type /DocTimeStamp).
+func processDocTimeStamp(v pdf.Value, file io.ReaderAt) (common.SignatureInfo, SignatureValidation, string, error) {
+	var info common.SignatureInfo
+	var validation SignatureValidation
+
+	content, err := readSignatureByteRange(v, file)
+	if err != nil {
+		return info, validation, fmt.Sprintf("Failed to process ByteRange: %v", err), nil
+	}
+
+	ts, err := timestamp.Parse([]byte(v.Key("Contents").RawString()))
+	if err != nil {
+		return info, validation, fmt.Sprintf("Failed to parse timestamp token: %v", err), nil
+	}
+	info.TimeStamp = ts
+	info.HashAlgorithm = ts.HashAlgorithm.String()
+
+	h := ts.HashAlgorithm.New()
+	h.Write(content)
+	if !bytes.Equal(h.Sum(nil), ts.HashedMessage) {
+		return info, validation, "timestamp message imprint does not match document hash", nil
+	}
+
+	validation.ValidSignature = true
+	validation.TrustedIssuer = false
+	validation.TimeSource = "embedded_timestamp"
+	validation.TimestampStatus = "valid"
+	return info, validation, "", nil
+}
+
 // processByteRange processes the byte range for signature verification.
 func processByteRange(v pdf.Value, file io.ReaderAt, p7 *pkcs7.PKCS7) error {
-	for i := 0; i < v.Key("ByteRange").Len(); i++ {
-		// As the byte range comes in pairs, we increment one extra
-		i++
-
-		// Read the byte range from the raw file and add it to the contents.
-		// This content will be hashed with the corresponding algorithm to
-		// verify the signature.
-		content, err := io.ReadAll(io.NewSectionReader(file, v.Key("ByteRange").Index(i-1).Int64(), v.Key("ByteRange").Index(i).Int64()))
-		if err != nil {
-			return fmt.Errorf("failed to read byte range %d: %v", i, err)
-		}
-
-		p7.Content = append(p7.Content, content...)
+	content, err := readSignatureByteRange(v, file)
+	if err != nil {
+		return err
 	}
+	p7.Content = content
 	return nil
 }
 

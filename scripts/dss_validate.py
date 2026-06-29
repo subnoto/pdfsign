@@ -46,9 +46,22 @@ def infer_profile(path: Path) -> str:
     name = path.name
     if "_TestSignLTA" in name:
         return "lta"
-    if "_TestSignLTV" in name:
+    if "_TestSignLTV" in name or "_TestMultiSignLTV" in name:
         return "ltv"
     return "baseline"
+
+
+def expected_signature_count(path: Path) -> int:
+    name = path.name
+    if "TestMultiSignThreeApprovals" in name:
+        return 3
+    if "TestMultiSignVisibleTwice" in name or "TestMultiSignTwice" in name:
+        return 2
+    if "TestMultiSignTSAThenApproval" in name or "TestMultiSignLTVThenApproval" in name:
+        return 2
+    if "TestMultiSign" in name:
+        return 2
+    return 1
 
 
 def validate_pdf(
@@ -94,6 +107,10 @@ def validate_pdf(
         simple = body.get("SimpleReport", {})
         count = simple.get("SignaturesCount", 0)
         return False, f"no DiagnosticData.Signature entries (SignaturesCount={count})"
+
+    expected = expected_signature_count(path)
+    if len(sigs) < expected:
+        return False, f"expected at least {expected} signature(s), got {len(sigs)}"
 
     problems: list[str] = []
     for i, sig in enumerate(sigs):
