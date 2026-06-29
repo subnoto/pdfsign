@@ -237,106 +237,8 @@ func getFieldRect(field pdf.Value) [4]float64 {
 func (context *SignContext) updateFieldObject(field pdf.Value, value string, makeReadOnly bool, appearanceFontScale float64) error {
 	ptr := field.GetPtr()
 	fieldObjID := uint32(ptr.GetID())
-	if ptr.GetID() == 0 {
-		// Direct object, skip parent update
-	} else {
-		// Build a new dictionary preserving existing keys except /V which we replace
-		var buf bytes.Buffer
-		buf.WriteString("<<\n")
 
-		existingFf := int64(0)
-		hasFf := false
-
-		for _, key := range field.Keys() {
-			if key == "V" {
-				continue
-			}
-			if key == "Ff" {
-				// Preserve existing field flags
-				existingFf = field.Key("Ff").Int64()
-				hasFf = true
-				continue // Will add it back later with read-only flag if needed
-			}
-			// skip appearance streams to force viewers to regenerate them
-			if key == "AP" {
-				// Generate new appearance stream for this field
-				rect := getFieldRect(field)
-				da := normalizeDA(field.Key("DA").RawString())
-				appearance, err := context.createTextFieldAppearance(value, rect, da, appearanceFontScale)
-				if err == nil {
-					apObjectId, err := context.addObject(appearance)
-					if err == nil {
-						buf.WriteString(fmt.Sprintf("/AP << /N %d 0 R >>\n", apObjectId))
-					}
-				}
-				continue
-			}
-			buf.WriteString(" /")
-			buf.WriteString(key)
-			buf.WriteString(" ")
-
-			// If this is the field name (/T) and it's encoded as UTF-16 with a BOM,
-			// decode it and write as a normal PDF string so Acrobat can use it.
-			switch key {
-			case "T":
-				tVal := field.Key("T").RawString()
-				asciiT := decodeFieldName(tVal)
-				tStr, err := context.encryptPdfString(fieldObjID, asciiT)
-				if err != nil {
-					return err
-				}
-				buf.WriteString(tStr)
-			case "DA":
-				// normalize appearance default string
-				daVal := field.Key("DA").RawString()
-				daStr, err := context.encryptPdfString(fieldObjID, normalizeDA(daVal))
-				if err != nil {
-					return err
-				}
-				buf.WriteString(daStr)
-			default:
-				if err := context.serializeCatalogEntry(&buf, fieldObjID, field.Key(key), fieldObjID); err != nil {
-					return err
-				}
-			}
-			buf.WriteString("\n")
-		}
-
-		// Set field flags with read-only if requested
-		if makeReadOnly {
-			newFf := existingFf | 2 // Set bit 1 (ReadOnly)
-			buf.WriteString(fmt.Sprintf(" /Ff %d\n", newFf))
-		} else if hasFf {
-			// Preserve existing Ff if not making read-only
-			buf.WriteString(fmt.Sprintf(" /Ff %d\n", existingFf))
-		}
-
-		// Set new value
-		buf.WriteString(" /V ")
-		vStr, err := context.encryptPdfString(fieldObjID, value)
-		if err != nil {
-			return err
-		}
-		buf.WriteString(vStr)
-		buf.WriteString("\n")
-		// Set appearance state to match value for proper rendering
-		buf.WriteString(" /AS ")
-		asStr, err := context.encryptPdfString(fieldObjID, value)
-		if err != nil {
-			return err
-		}
-		buf.WriteString(asStr)
-		buf.WriteString("\n")
-		buf.WriteString(">>\n")
-
-		if err := context.updateObject(uint32(ptr.GetID()), buf.Bytes()); err != nil {
-			return fmt.Errorf("failed to update field object %d: %w", ptr.GetID(), err)
-		}
-	}
-
-	// Also try to update any Kids (widget annotations) so visible widget values
-	// reflect the new value. Kids can be indirect references and should be
-	// updated even when the parent field is a direct object.
+	// Update widget annotations first so parent /Kids references pick up new generations.
 	kids := field.Key("Kids")
 	if !kids.IsNull() {
 		for k := 0; k < kids.Len(); k++ {
@@ -345,104 +247,212 @@ func (context *SignContext) updateFieldObject(field pdf.Value, value string, mak
 			if kptr.GetID() == 0 {
 				continue
 			}
-			kidObjID := uint32(kptr.GetID())
-
-			var kbuf bytes.Buffer
-			kbuf.WriteString("<<\n")
-
-			existingKidFf := int64(0)
-			hasKidFf := false
-
-			for _, kkey := range kid.Keys() {
-				if kkey == "V" {
-					continue
-				}
-				if kkey == "Ff" {
-					existingKidFf = kid.Key("Ff").Int64()
-					hasKidFf = true
-					continue
-				}
-				if kkey == "AP" {
-					// Generate new appearance stream for this widget
-					var rect [4]float64
-					if rectVal := kid.Key("Rect"); !rectVal.IsNull() && rectVal.Kind() == pdf.Array && rectVal.Len() >= 4 {
-						rect[0] = rectVal.Index(0).Float64()
-						rect[1] = rectVal.Index(1).Float64()
-						rect[2] = rectVal.Index(2).Float64()
-						rect[3] = rectVal.Index(3).Float64()
-					} else {
-						rect = [4]float64{0, 0, 100, 20} // default size
-					}
-					da := normalizeDA(kid.Key("DA").RawString())
-					appearance, err := context.createTextFieldAppearance(value, rect, da, appearanceFontScale)
-					if err == nil {
-						apObjectId, err := context.addObject(appearance)
-						if err == nil {
-							kbuf.WriteString(fmt.Sprintf(" /AP << /N %d 0 R >>\n", apObjectId))
-						}
-					}
-					continue
-				}
-				kbuf.WriteString(" /")
-				kbuf.WriteString(kkey)
-				kbuf.WriteString(" ")
-
-				// Handle widget /T similarly: decode UTF-16 BOM if present
-				switch kkey {
-				case "T":
-					tVal := kid.Key("T").RawString()
-					asciiT := decodeFieldName(tVal)
-					tStr, err := context.encryptPdfString(kidObjID, asciiT)
-					if err != nil {
-						return err
-					}
-					kbuf.WriteString(tStr)
-				case "DA":
-					daVal := kid.Key("DA").RawString()
-					daStr, err := context.encryptPdfString(kidObjID, normalizeDA(daVal))
-					if err != nil {
-						return err
-					}
-					kbuf.WriteString(daStr)
-				default:
-					if err := context.serializeCatalogEntry(&kbuf, kidObjID, kid.Key(kkey), kidObjID); err != nil {
-						return err
-					}
-				}
-				kbuf.WriteString("\n")
-			}
-
-			// Set field flags with read-only if requested
-			if makeReadOnly {
-				newKidFf := existingKidFf | 2 // Set bit 1 (ReadOnly)
-				kbuf.WriteString(fmt.Sprintf(" /Ff %d\n", newKidFf))
-			} else if hasKidFf {
-				kbuf.WriteString(fmt.Sprintf(" /Ff %d\n", existingKidFf))
-			}
-
-			kbuf.WriteString(" /V ")
-			kvStr, err := context.encryptPdfString(kidObjID, value)
-			if err != nil {
+			if err := context.updateFieldWidget(kid, value, makeReadOnly, appearanceFontScale); err != nil {
 				return err
-			}
-			kbuf.WriteString(kvStr)
-			kbuf.WriteString("\n")
-			// Set appearance state to match value for proper rendering
-			kbuf.WriteString(" /AS ")
-			kasStr, err := context.encryptPdfString(kidObjID, value)
-			if err != nil {
-				return err
-			}
-			kbuf.WriteString(kasStr)
-			kbuf.WriteString("\n")
-			kbuf.WriteString(">>\n")
-
-			if err := context.updateObject(uint32(kptr.GetID()), kbuf.Bytes()); err != nil {
-				return fmt.Errorf("failed to update kid object %d: %w", kptr.GetID(), err)
 			}
 		}
 	}
 
+	if ptr.GetID() == 0 {
+		return nil
+	}
+
+	// Build a new dictionary preserving existing keys except /V which we replace
+	var buf bytes.Buffer
+	buf.WriteString("<<\n")
+
+	existingFf := int64(0)
+	hasFf := false
+
+	for _, key := range field.Keys() {
+		if key == "V" {
+			continue
+		}
+		if key == "Ff" {
+			// Preserve existing field flags
+			existingFf = field.Key("Ff").Int64()
+			hasFf = true
+			continue // Will add it back later with read-only flag if needed
+		}
+		// skip appearance streams to force viewers to regenerate them
+		if key == "AP" {
+			// Generate new appearance stream for this field
+			rect := getFieldRect(field)
+			da := normalizeDA(field.Key("DA").RawString())
+			appearance, err := context.createTextFieldAppearance(value, rect, da, appearanceFontScale)
+			if err == nil {
+				apObjectId, err := context.addObject(appearance)
+				if err == nil {
+					buf.WriteString(fmt.Sprintf("/AP << /N %d 0 R >>\n", apObjectId))
+				}
+			}
+			continue
+		}
+		buf.WriteString(" /")
+		buf.WriteString(key)
+		buf.WriteString(" ")
+
+		// If this is the field name (/T) and it's encoded as UTF-16 with a BOM,
+		// decode it and write as a normal PDF string so Acrobat can use it.
+		switch key {
+		case "T":
+			tVal := field.Key("T").RawString()
+			asciiT := decodeFieldName(tVal)
+			tStr, err := context.encryptPdfString(fieldObjID, asciiT)
+			if err != nil {
+				return err
+			}
+			buf.WriteString(tStr)
+		case "DA":
+			// normalize appearance default string
+			daVal := field.Key("DA").RawString()
+			daStr, err := context.encryptPdfString(fieldObjID, normalizeDA(daVal))
+			if err != nil {
+				return err
+			}
+			buf.WriteString(daStr)
+		default:
+			if err := context.serializeCatalogEntry(&buf, fieldObjID, field.Key(key), fieldObjID); err != nil {
+				return err
+			}
+		}
+		buf.WriteString("\n")
+	}
+
+	// Set field flags with read-only if requested
+	if makeReadOnly {
+		newFf := existingFf | 2 // Set bit 1 (ReadOnly)
+		buf.WriteString(fmt.Sprintf(" /Ff %d\n", newFf))
+	} else if hasFf {
+		// Preserve existing Ff if not making read-only
+		buf.WriteString(fmt.Sprintf(" /Ff %d\n", existingFf))
+	}
+
+	// Set new value
+	buf.WriteString(" /V ")
+	vStr, err := context.encryptPdfString(fieldObjID, value)
+	if err != nil {
+		return err
+	}
+	buf.WriteString(vStr)
+	buf.WriteString("\n")
+	// Set appearance state to match value for proper rendering
+	buf.WriteString(" /AS ")
+	asStr, err := context.encryptPdfString(fieldObjID, value)
+	if err != nil {
+		return err
+	}
+	buf.WriteString(asStr)
+	buf.WriteString("\n")
+	buf.WriteString(">>\n")
+
+	if err := context.updateObject(uint32(ptr.GetID()), buf.Bytes()); err != nil {
+		return fmt.Errorf("failed to update field object %d: %w", ptr.GetID(), err)
+	}
+
+	return nil
+}
+
+func (context *SignContext) updateFieldWidget(kid pdf.Value, value string, makeReadOnly bool, appearanceFontScale float64) error {
+	kptr := kid.GetPtr()
+	if kptr.GetID() == 0 {
+		return nil
+	}
+	kidObjID := uint32(kptr.GetID())
+
+	var kbuf bytes.Buffer
+	kbuf.WriteString("<<\n")
+
+	existingKidFf := int64(0)
+	hasKidFf := false
+
+	for _, kkey := range kid.Keys() {
+		if kkey == "V" {
+			continue
+		}
+		if kkey == "Ff" {
+			existingKidFf = kid.Key("Ff").Int64()
+			hasKidFf = true
+			continue
+		}
+		if kkey == "AP" {
+			// Generate new appearance stream for this widget
+			var rect [4]float64
+			if rectVal := kid.Key("Rect"); !rectVal.IsNull() && rectVal.Kind() == pdf.Array && rectVal.Len() >= 4 {
+				rect[0] = rectVal.Index(0).Float64()
+				rect[1] = rectVal.Index(1).Float64()
+				rect[2] = rectVal.Index(2).Float64()
+				rect[3] = rectVal.Index(3).Float64()
+			} else {
+				rect = [4]float64{0, 0, 100, 20} // default size
+			}
+			da := normalizeDA(kid.Key("DA").RawString())
+			appearance, err := context.createTextFieldAppearance(value, rect, da, appearanceFontScale)
+			if err == nil {
+				apObjectId, err := context.addObject(appearance)
+				if err == nil {
+					kbuf.WriteString(fmt.Sprintf(" /AP << /N %d 0 R >>\n", apObjectId))
+				}
+			}
+			continue
+		}
+		kbuf.WriteString(" /")
+		kbuf.WriteString(kkey)
+		kbuf.WriteString(" ")
+
+		// Handle widget /T similarly: decode UTF-16 BOM if present
+		switch kkey {
+		case "T":
+			tVal := kid.Key("T").RawString()
+			asciiT := decodeFieldName(tVal)
+			tStr, err := context.encryptPdfString(kidObjID, asciiT)
+			if err != nil {
+				return err
+			}
+			kbuf.WriteString(tStr)
+		case "DA":
+			daVal := kid.Key("DA").RawString()
+			daStr, err := context.encryptPdfString(kidObjID, normalizeDA(daVal))
+			if err != nil {
+				return err
+			}
+			kbuf.WriteString(daStr)
+		default:
+			if err := context.serializeCatalogEntry(&kbuf, kidObjID, kid.Key(kkey), kidObjID); err != nil {
+				return err
+			}
+		}
+		kbuf.WriteString("\n")
+	}
+
+	// Set field flags with read-only if requested
+	if makeReadOnly {
+		newKidFf := existingKidFf | 2 // Set bit 1 (ReadOnly)
+		kbuf.WriteString(fmt.Sprintf(" /Ff %d\n", newKidFf))
+	} else if hasKidFf {
+		kbuf.WriteString(fmt.Sprintf(" /Ff %d\n", existingKidFf))
+	}
+
+	kbuf.WriteString(" /V ")
+	kvStr, err := context.encryptPdfString(kidObjID, value)
+	if err != nil {
+		return err
+	}
+	kbuf.WriteString(kvStr)
+	kbuf.WriteString("\n")
+	// Set appearance state to match value for proper rendering
+	kbuf.WriteString(" /AS ")
+	kasStr, err := context.encryptPdfString(kidObjID, value)
+	if err != nil {
+		return err
+	}
+	kbuf.WriteString(kasStr)
+	kbuf.WriteString("\n")
+	kbuf.WriteString(">>\n")
+
+	if err := context.updateObject(uint32(kptr.GetID()), kbuf.Bytes()); err != nil {
+		return fmt.Errorf("failed to update kid object %d: %w", kptr.GetID(), err)
+	}
 	return nil
 }
 

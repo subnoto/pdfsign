@@ -294,7 +294,7 @@ func TestWriteXrefTypeStream(t *testing.T) {
 	}
 
 	got := context.OutputBuffer.Buff.String()
-	expect := "\n\n5 0 obj\n<< /Type /XRef\n  /Length 22\n  /Filter /FlateDecode\n  /W [ 1 4 1 ]\n  /Prev 0\n  /Size 3\n  /Index [ 3 2 ]\n  /Root 0 0 R\n>>\nstream\nx\x9cbd``Ha\x00\x91'\x18\x00\x01\x00\x00\xff\xff\x04\xce\x01/\nendstream\nendobj\n"
+	expect := "\n\n5 0 obj\n<< /Type /XRef\n  /Length 24\n  /Filter /FlateDecode\n  /W [ 1 4 2 ]\n  /Prev 0\n  /Size 3\n  /Index [ 3 2 ]\n  /Root 0 0 R\n>>\nstream\nx\x9cbd``Ha`\x00Q'\x18\x18\x00\x01\x00\x00\xff\xff\x06c\x01/\nendstream\nendobj\n"
 	if got != expect {
 		t.Errorf("writeXref() output = %q, want %q", got, expect)
 	}

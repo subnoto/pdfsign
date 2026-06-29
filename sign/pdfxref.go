@@ -85,14 +85,18 @@ func (context *SignContext) latestObjectGeneration(id uint32) int {
 	}
 
 	// digitorus/pdf does not always merge generation numbers from incremental
-	// xref updates for objects that already exist; scan the input bytes for the
+	// xref updates for objects that already exist; scan the PDF bytes for the
 	// highest "id gen obj" header.
-	if context.InputFile != nil {
-		if _, err := context.InputFile.Seek(0, 0); err == nil {
-			data, err := io.ReadAll(context.InputFile)
-			if err == nil {
-				maxGen = max(maxGen, highestObjectGenerationInPDF(data, id))
-				_, _ = context.InputFile.Seek(0, 0)
+	if context.OutputBuffer != nil && context.OutputBuffer.Buff.Len() > 0 {
+		maxGen = max(maxGen, highestObjectGenerationInPDF(context.OutputBuffer.Buff.Bytes(), id))
+	} else if context.InputFile != nil {
+		cur, err := context.InputFile.Seek(0, io.SeekCurrent)
+		if err == nil {
+			if _, err := context.InputFile.Seek(0, io.SeekStart); err == nil {
+				if data, err := io.ReadAll(context.InputFile); err == nil {
+					maxGen = max(maxGen, highestObjectGenerationInPDF(data, id))
+				}
+				_, _ = context.InputFile.Seek(cur, io.SeekStart)
 			}
 		}
 	}

@@ -80,10 +80,10 @@ func (context *SignContext) createCatalog() ([]byte, error) {
 					}
 					v := fields.Index(i)
 					if ptr := v.GetPtr(); ptr.GetID() != 0 {
-						// Indirect reference
+						gen := context.latestObjectGeneration(uint32(ptr.GetID()))
 						catalog_buffer.WriteString(strconv.Itoa(int(ptr.GetID())))
 						catalog_buffer.WriteString(" ")
-						catalog_buffer.WriteString(strconv.Itoa(int(ptr.GetGen())))
+						catalog_buffer.WriteString(strconv.Itoa(gen))
 						catalog_buffer.WriteString(" R")
 					} else {
 						// Direct value
@@ -223,8 +223,8 @@ func (context *SignContext) createCatalog() ([]byte, error) {
 // targetObjID is the object ID of the object being written, used for string encryption.
 func (context *SignContext) serializeCatalogEntry(w io.Writer, rootObjId uint32, value pdf.Value, targetObjID ...uint32) error {
 	if ptr := value.GetPtr(); ptr.GetID() != rootObjId {
-		// Indirect object
-		_, _ = fmt.Fprintf(w, "%d %d R", ptr.GetID(), ptr.GetGen())
+		gen := context.latestObjectGeneration(uint32(ptr.GetID()))
+		_, _ = fmt.Fprintf(w, "%d %d R", ptr.GetID(), gen)
 		return nil
 	}
 

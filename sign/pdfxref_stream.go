@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	xrefStreamColumns   = 6 // Column width (1+4+1)
+	xrefStreamColumns   = 7 // Column width (1+4+2)
 	xrefStreamPredictor = 12
 	defaultPredictor    = 1  // No prediction (the default value)
 	pngSubPredictor     = 11 // PNG prediction (on encoding, PNG Sub on all rows)
@@ -62,12 +62,20 @@ func (context *SignContext) writeXrefStream() error {
 func writeXrefStreamEntries(buffer *bytes.Buffer, context *SignContext) error {
 	// Write updated entries first
 	for _, entry := range context.updatedXrefEntries {
-		writeXrefStreamLine(buffer, 1, int(entry.Offset), xrefStreamGeneration(entry.Generation))
+		gen, err := validateXrefStreamGeneration(entry.Generation)
+		if err != nil {
+			return err
+		}
+		writeXrefStreamLine(buffer, 1, int(entry.Offset), gen)
 	}
 
 	// Write new entries
 	for _, entry := range context.newXrefEntries {
-		writeXrefStreamLine(buffer, 1, int(entry.Offset), xrefStreamGeneration(entry.Generation))
+		gen, err := validateXrefStreamGeneration(entry.Generation)
+		if err != nil {
+			return err
+		}
+		writeXrefStreamLine(buffer, 1, int(entry.Offset), gen)
 	}
 
 	return nil
@@ -111,8 +119,7 @@ func writeXrefStreamHeader(buffer *bytes.Buffer, context *SignContext, streamLen
 	buffer.WriteString("<< /Type /XRef\n")
 	fmt.Fprintf(buffer, "  /Length %d\n", streamLength)
 	buffer.WriteString("  /Filter /FlateDecode\n")
-	// Change W array to [1 4 1] to accommodate larger offsets
-	buffer.WriteString("  /W [ 1 4 1 ]\n")
+	buffer.WriteString("  /W [ 1 4 2 ]\n")
 	fmt.Fprintf(buffer, "  /Prev %d\n", context.PDFReader.XrefInformation.StartPos)
 	fmt.Fprintf(buffer, "  /Size %d\n", totalEntries+1)
 
@@ -163,18 +170,15 @@ func writeXrefStreamContent(buffer *bytes.Buffer, streamBytes []byte) error {
 	return nil
 }
 
-func xrefStreamGeneration(gen int) byte {
-	if gen < 0 {
-		return 0
+func validateXrefStreamGeneration(gen int) (uint16, error) {
+	if gen < 0 || gen > 65535 {
+		return 0, fmt.Errorf("xref stream generation %d out of range (0-65535)", gen)
 	}
-	if gen > 255 {
-		return 255
-	}
-	return byte(gen)
+	return uint16(gen), nil
 }
 
 // writeXrefStreamLine writes a single line in the xref stream.
-func writeXrefStreamLine(b *bytes.Buffer, xreftype byte, offset int, gen byte) {
+func writeXrefStreamLine(b *bytes.Buffer, xreftype byte, offset int, gen uint16) {
 	// Write type (1 byte)
 	b.WriteByte(xreftype)
 
@@ -183,8 +187,10 @@ func writeXrefStreamLine(b *bytes.Buffer, xreftype byte, offset int, gen byte) {
 	binary.BigEndian.PutUint32(offsetBytes, uint32(offset))
 	b.Write(offsetBytes)
 
-	// Write generation (1 byte)
-	b.WriteByte(gen)
+	// Write generation (2 bytes)
+	genBytes := make([]byte, 2)
+	binary.BigEndian.PutUint16(genBytes, gen)
+	b.Write(genBytes)
 }
 
 // EncodePNGSUBBytes encodes data using PNG SUB filter.
