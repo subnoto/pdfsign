@@ -4,7 +4,7 @@ Three layers validate outputs under `testfiles/success/` (created by `go test -v
 
 | Layer | Tool | Standards |
 | ----- | ---- | --------- |
-| PDF structure + byte-range integrity | [pdfcpu](https://github.com/pdfcpu/pdfcpu) | ISO 32000 (strict mode) |
+| PDF structure + byte-range integrity | [pdfcpu](https://github.com/pdfcpu/pdfcpu) | ISO 32000 (relaxed mode; sources with pre-existing errors are skipped) |
 | Cryptographic verification | `pdfsign verify` / `verify` package | RFC 5652 (CMS), RFC 3161 (timestamps), RFC 9336 (cert profile) |
 | PAdES structure + crypto (Go tests) | `sign/conformance_test.go` | ISO 32000 signature dictionaries, PAdES CMS detached profile |
 | PAdES validation (optional) | [EU DSS](https://github.com/esig/dss) via REST | ETSI EN 319 142; CI runs on push to `main` and `workflow_dispatch`, not on pull requests |

@@ -71,10 +71,10 @@ def _wire_acroform_fields(pdf: pikepdf.Pdf) -> None:
                 fields.append(annot)
     if not fields:
         return
+    # Widget annotations already carry /DA; omit AcroForm-level /DA (invalid if double-encoded).
     pdf.Root.AcroForm = pdf.make_indirect(
         Dictionary(
             Fields=pikepdf.Array(fields),
-            DA="(/Helv 10 Tf 0 0 0 rg)",
         )
     )
 
