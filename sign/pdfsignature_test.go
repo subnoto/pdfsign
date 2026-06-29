@@ -22,7 +22,7 @@ var signatureTests = []struct {
 		expectedSignatures: map[CertType]string{
 			CertificationSignature: "<<\n /Type /Sig\n /Filter /Adobe.PPKLite\n /SubFilter /adbe.pkcs7.detached\n /Prop_Build <<\n   /App << /Name /Digitorus#20PDFSign >>\n >>\n /ByteRange[0 ********** ********** **********] /Contents<>\n /Reference [\n << /Type /SigRef\n /TransformMethod /DocMDP\n /TransformParams <<\n   /Type /TransformParams\n   /P 2   /V /1.2\n   >>\n >> ] /Name (John Doe)\n /Location (Somewhere)\n /Reason (Test)\n /ContactInfo (None)\n /M (D:20170923143900+03'00')\n>>\n",
 			UsageRightsSignature:   "<<\n /Type /Sig\n /Filter /Adobe.PPKLite\n /SubFilter /adbe.pkcs7.detached\n /Prop_Build <<\n   /App << /Name /Digitorus#20PDFSign >>\n >>\n /ByteRange[0 ********** ********** **********] /Contents<>\n /Reference [\n << /Type /SigRef\n   /TransformMethod /UR3\n   /TransformParams <<\n     /Type /TransformParams\n     /V /2.2\n   >>\n >> ] /Name (John Doe)\n /Location (Somewhere)\n /Reason (Test)\n /ContactInfo (None)\n /M (D:20170923143900+03'00')\n>>\n",
-			ApprovalSignature:      "<<\n /Type /Sig\n /Filter /Adobe.PPKLite\n /SubFilter /adbe.pkcs7.detached\n /Prop_Build <<\n   /App << /Name /Digitorus#20PDFSign >>\n >>\n /ByteRange[0 ********** ********** **********] /Contents<>\n   /TransformMethod /FieldMDP\n   /TransformParams <<\n     /Type /TransformParams\n     /Action /All\n     /V /1.2\n >>\n /Name (John Doe)\n /Location (Somewhere)\n /Reason (Test)\n /ContactInfo (None)\n /M (D:20170923143900+03'00')\n>>\n",
+			ApprovalSignature:      "<<\n /Type /Sig\n /Filter /Adobe.PPKLite\n /SubFilter /adbe.pkcs7.detached\n /Prop_Build <<\n   /App << /Name /Digitorus#20PDFSign >>\n >>\n /ByteRange[0 ********** ********** **********] /Contents<>\n /Reference [\n << /Type /SigRef\n /TransformMethod /FieldMDP\n /TransformParams <<\n     /Type /TransformParams\n     /Action /All\n     /V /1.2\n   >>\n >> ] /Name (John Doe)\n /Location (Somewhere)\n /Reason (Test)\n /ContactInfo (None)\n /M (D:20170923143900+03'00')\n>>\n",
 		},
 	},
 }
@@ -75,7 +75,10 @@ func TestCreateSignaturePlaceholder(t *testing.T) {
 					SignData:  sign_data,
 				}
 
-				signature := context.createSignaturePlaceholder()
+				signature, err := context.createSignaturePlaceholder()
+				if err != nil {
+					st.Fatal(err)
+				}
 
 				if string(signature) != expectedSignature {
 					st.Errorf("Signature mismatch, expected:\n%q\nbut got:\n%q", expectedSignature, signature)
@@ -123,7 +126,11 @@ func TestCreateSignaturePlaceholderWithTSAAndDate(t *testing.T) {
 		SignData:  signData,
 	}
 
-	placeholder := string(context.createSignaturePlaceholder())
+	placeholderBytes, err := context.createSignaturePlaceholder()
+	if err != nil {
+		t.Fatal(err)
+	}
+	placeholder := string(placeholderBytes)
 	if !strings.Contains(placeholder, "/M ") || !strings.Contains(placeholder, "D:20170923143900") {
 		t.Fatalf("expected /M date even when TSA is configured, got:\n%s", placeholder)
 	}

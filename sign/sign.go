@@ -4,6 +4,7 @@ import (
 	"crypto"
 	"crypto/x509"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -191,7 +192,10 @@ func (context *SignContext) SignPDF() (*common.SignatureInfo, error) {
 	case TimeStampSignature:
 		signature_object = context.createTimestampPlaceholder()
 	default:
-		signature_object = context.createSignaturePlaceholder()
+		signature_object, err = context.createSignaturePlaceholder()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create signature placeholder: %w", err)
+		}
 	}
 
 	// Write the new signature object
@@ -277,6 +281,9 @@ func (context *SignContext) SignPDF() (*common.SignatureInfo, error) {
 
 	// Replace signature
 	if err := context.replaceSignature(); err != nil {
+		if errors.Is(err, errSignatureBufferTooSmall) {
+			return context.SignPDF()
+		}
 		return nil, fmt.Errorf("failed to replace signature: %w", err)
 	}
 

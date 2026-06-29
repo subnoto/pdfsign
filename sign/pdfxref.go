@@ -111,15 +111,15 @@ func (context *SignContext) writeXref() error {
 
 // encryptPdfString encrypts a text string for the given object ID and returns it
 // in PDF syntax. Without encryption: (escaped text). With encryption: <hex of encrypted>.
-func (context *SignContext) encryptPdfString(objID uint32, text string) string {
+func (context *SignContext) encryptPdfString(objID uint32, text string) (string, error) {
 	if context.encryption == nil {
-		return pdfString(text)
+		return pdfString(text), nil
 	}
 	encrypted, err := context.encryptStreamData(objID, []byte(text))
 	if err != nil {
-		return pdfString(text) // fallback
+		return "", fmt.Errorf("encrypt pdf string for object %d: %w", objID, err)
 	}
-	return "<" + hex.EncodeToString(encrypted) + ">"
+	return "<" + hex.EncodeToString(encrypted) + ">", nil
 }
 
 // encryptStreamData encrypts stream data for the given object ID if the PDF is encrypted.

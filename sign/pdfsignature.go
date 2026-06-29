@@ -22,11 +22,15 @@ import (
 // TimestampHTTPClient is used for RFC 3161 TSA requests. On the js/wasm runtime
 // this should be overridden with a transport that routes through the host's
 // Fetch API, because the native TCP dialer is not available in that environment.
-var TimestampHTTPClient = &http.Client{}
+var TimestampHTTPClient = &http.Client{Timeout: defaultHTTPTimeout}
 
 const signatureByteRangePlaceholder = "/ByteRange[0 ********** ********** **********]"
 
-func (context *SignContext) createSignaturePlaceholder() []byte {
+// errSignatureBufferTooSmall is returned when the CMS signature exceeds the reserved
+// /Contents placeholder. SignPDF catches this and retries with a larger buffer.
+var errSignatureBufferTooSmall = errors.New("signature buffer too small")
+
+func (context *SignContext) createSignaturePlaceholder() ([]byte, error) {
 	// Using a buffer because it's way faster than concatenating.
 	var signature_buffer bytes.Buffer
 
@@ -46,7 +50,7 @@ func (context *SignContext) createSignaturePlaceholder() []byte {
 	signature_buffer.WriteString(">\n")
 
 	switch context.SignData.Signature.CertType {
-	case CertificationSignature, UsageRightsSignature:
+	case CertificationSignature, UsageRightsSignature, ApprovalSignature:
 		signature_buffer.WriteString(" /Reference [\n") // start array of signature reference dictionaries
 		signature_buffer.WriteString(" << /Type /SigRef\n")
 	}
@@ -84,6 +88,7 @@ func (context *SignContext) createSignaturePlaceholder() []byte {
 		// V [name]: (Optional) The DocMDP transform parameters dictionary version. The only valid value shall be 1.2.
 		//   Default value: 1.2. (This value is a name object, not a number.)
 		signature_buffer.WriteString("   /V /1.2\n")
+		signature_buffer.WriteString("   >>\n") // close TransformParams
 
 	// Usage rights signature (deprecated in PDF 2.0)
 	case UsageRightsSignature:
@@ -93,15 +98,16 @@ func (context *SignContext) createSignaturePlaceholder() []byte {
 		signature_buffer.WriteString("   /TransformParams <<\n")
 		signature_buffer.WriteString("     /Type /TransformParams\n")
 		signature_buffer.WriteString("     /V /2.2\n")
+		signature_buffer.WriteString("   >>\n") // close TransformParams
 
 	// Approval signatures (also known as recipient signatures)
 	case ApprovalSignature:
 		// Used to detect modifications to a list of form fields specified in TransformParams; see
 		// 12.8.2.4, "FieldMDP"
-		signature_buffer.WriteString("   /TransformMethod /FieldMDP\n")
+		signature_buffer.WriteString(" /TransformMethod /FieldMDP\n")
 
 		// Entries in the FieldMDP transform parameters dictionary (Table 259)
-		signature_buffer.WriteString("   /TransformParams <<\n")
+		signature_buffer.WriteString(" /TransformParams <<\n")
 
 		// Type [name]: (Optional) The type of PDF object that this dictionary describes;
 		//   if present, shall be TransformParams for a transform parameters dictionary.
@@ -119,35 +125,30 @@ func (context *SignContext) createSignaturePlaceholder() []byte {
 		//   dictionary version. The value for PDF 1.5 and later shall be 1.2.
 		//   Default value: 1.2. (This value is a name object, not a number.)
 		signature_buffer.WriteString("     /V /1.2\n")
+		signature_buffer.WriteString("   >>\n") // close TransformParams
 	}
 
 	// (Required) A name identifying the algorithm that shall be used when computing the digest if not specified in the
 	// certificate. Valid values are MD5, SHA1 SHA256, SHA384, SHA512 and RIPEMD160
 	switch context.SignData.DigestAlgorithm {
 	case crypto.MD5:
-		signature_buffer.WriteString("   /DigestMethod /MD5\n")
+		signature_buffer.WriteString(" /DigestMethod /MD5\n")
 	case crypto.SHA1:
-		signature_buffer.WriteString("   /DigestMethod /SHA1\n")
+		signature_buffer.WriteString(" /DigestMethod /SHA1\n")
 	case crypto.SHA256:
-		signature_buffer.WriteString("   /DigestMethod /SHA256\n")
+		signature_buffer.WriteString(" /DigestMethod /SHA256\n")
 	case crypto.SHA384:
-		signature_buffer.WriteString("   /DigestMethod /SHA384\n")
+		signature_buffer.WriteString(" /DigestMethod /SHA384\n")
 	case crypto.SHA512:
-		signature_buffer.WriteString("   /DigestMethod /SHA512\n")
+		signature_buffer.WriteString(" /DigestMethod /SHA512\n")
 	case crypto.RIPEMD160:
-		signature_buffer.WriteString("   /DigestMethod /RIPEMD160\n")
+		signature_buffer.WriteString(" /DigestMethod /RIPEMD160\n")
 	}
 
 	switch context.SignData.Signature.CertType {
-	case CertificationSignature, UsageRightsSignature:
-		signature_buffer.WriteString("   >>\n") // close TransformParams
-		signature_buffer.WriteString(" >>")     // close SigRef
-		signature_buffer.WriteString(" ]")      // end of reference
-	}
-
-	switch context.SignData.Signature.CertType {
-	case ApprovalSignature:
-		signature_buffer.WriteString(" >>\n")
+	case CertificationSignature, UsageRightsSignature, ApprovalSignature:
+		signature_buffer.WriteString(" >>") // close SigRef
+		signature_buffer.WriteString(" ]")  // end of reference
 	}
 
 	// Predict the object ID for this signature dict so we can encrypt strings
@@ -156,22 +157,38 @@ func (context *SignContext) createSignaturePlaceholder() []byte {
 
 	if context.SignData.Signature.Info.Name != "" {
 		signature_buffer.WriteString(" /Name ")
-		signature_buffer.WriteString(context.encryptPdfString(sigObjID, context.SignData.Signature.Info.Name))
+		nameStr, err := context.encryptPdfString(sigObjID, context.SignData.Signature.Info.Name)
+		if err != nil {
+			return nil, err
+		}
+		signature_buffer.WriteString(nameStr)
 		signature_buffer.WriteString("\n")
 	}
 	if context.SignData.Signature.Info.Location != "" {
 		signature_buffer.WriteString(" /Location ")
-		signature_buffer.WriteString(context.encryptPdfString(sigObjID, context.SignData.Signature.Info.Location))
+		locationStr, err := context.encryptPdfString(sigObjID, context.SignData.Signature.Info.Location)
+		if err != nil {
+			return nil, err
+		}
+		signature_buffer.WriteString(locationStr)
 		signature_buffer.WriteString("\n")
 	}
 	if context.SignData.Signature.Info.Reason != "" {
 		signature_buffer.WriteString(" /Reason ")
-		signature_buffer.WriteString(context.encryptPdfString(sigObjID, context.SignData.Signature.Info.Reason))
+		reasonStr, err := context.encryptPdfString(sigObjID, context.SignData.Signature.Info.Reason)
+		if err != nil {
+			return nil, err
+		}
+		signature_buffer.WriteString(reasonStr)
 		signature_buffer.WriteString("\n")
 	}
 	if context.SignData.Signature.Info.ContactInfo != "" {
 		signature_buffer.WriteString(" /ContactInfo ")
-		signature_buffer.WriteString(context.encryptPdfString(sigObjID, context.SignData.Signature.Info.ContactInfo))
+		contactStr, err := context.encryptPdfString(sigObjID, context.SignData.Signature.Info.ContactInfo)
+		if err != nil {
+			return nil, err
+		}
+		signature_buffer.WriteString(contactStr)
 		signature_buffer.WriteString("\n")
 	}
 
@@ -191,7 +208,11 @@ func (context *SignContext) createSignaturePlaceholder() []byte {
 		// on the raw date string instead.
 		if context.encryption != nil {
 			dateStr := formatPdfDateString(context.SignData.Signature.Info.Date)
-			signature_buffer.WriteString(context.encryptPdfString(sigObjID, dateStr))
+			encDate, err := context.encryptPdfString(sigObjID, dateStr)
+			if err != nil {
+				return nil, err
+			}
+			signature_buffer.WriteString(encDate)
 		} else {
 			signature_buffer.WriteString(pdfDateTime(context.SignData.Signature.Info.Date))
 		}
@@ -200,7 +221,7 @@ func (context *SignContext) createSignaturePlaceholder() []byte {
 
 	signature_buffer.WriteString(">>\n")
 
-	return signature_buffer.Bytes()
+	return signature_buffer.Bytes(), nil
 }
 
 func (context *SignContext) createTimestampPlaceholder() []byte {
@@ -477,6 +498,12 @@ func (context *SignContext) replaceSignature() error {
 	dst := make([]byte, hex.EncodedLen(len(signature)))
 	hex.Encode(dst, signature)
 
+	if uint32(len(dst)) > context.SignatureMaxLength {
+		log.Println("Signature too long, retrying with increased buffer size.")
+		context.SignatureMaxLengthBase += (uint32(len(dst)) - context.SignatureMaxLength) + 1
+		return errSignatureBufferTooSmall
+	}
+
 	zeroPadding := bytes.Repeat([]byte("0"), int(context.SignatureMaxLength)-len(dst))
 
 	// Compute signature hash from the binary signature data + zero padding
@@ -489,14 +516,6 @@ func (context *SignContext) replaceSignature() error {
 	context.computedSignatureHash = hex.EncodeToString(signatureHasher.Sum(nil))
 
 	hexContent := append(dst, zeroPadding...)
-
-	if uint32(len(hexContent)) > context.SignatureMaxLength {
-		log.Println("Signature too long, retrying with increased buffer size.")
-		// set new base and try signing again
-		context.SignatureMaxLengthBase += (uint32(len(hexContent)) - context.SignatureMaxLength) + 1
-		_, err := context.SignPDF()
-		return err
-	}
 
 	if _, err := context.OutputBuffer.Seek(0, 0); err != nil {
 		return err

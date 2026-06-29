@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/digitorus/pdf"
 	"github.com/subnoto/pdfsign/common"
@@ -19,11 +20,17 @@ import (
 	"golang.org/x/crypto/ocsp"
 )
 
+// defaultHTTPTimeout limits how long signing waits on TSA/OCSP/CRL HTTP calls.
+const defaultHTTPTimeout = 30 * time.Second
+
 // RevocationHTTPClient uses a clone of DefaultTransport. On the js/wasm runtime
 // this routes requests through the host's Fetch API (global.fetch), unlike the
 // package-level http.Get/http.Post helpers which fall back to a (non-functional)
 // native dialer.
-var RevocationHTTPClient = &http.Client{Transport: &http.Transport{Proxy: http.ProxyFromEnvironment}}
+var RevocationHTTPClient = &http.Client{
+	Timeout:   defaultHTTPTimeout,
+	Transport: &http.Transport{Proxy: http.ProxyFromEnvironment},
+}
 
 func embedOCSPRevocationStatus(cert, issuer *x509.Certificate, i *revocation.InfoArchival) error {
 	req, err := ocsp.CreateRequest(cert, issuer, nil)
@@ -47,6 +54,10 @@ func embedOCSPRevocationStatus(cert, issuer *x509.Certificate, i *revocation.Inf
 			lastErr = err
 			continue
 		}
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("OCSP request failed: %s", resp.Status)
+			continue
+		}
 		if _, err := ocsp.ParseResponseForCert(body, cert, issuer); err != nil {
 			lastErr = err
 			continue
@@ -62,6 +73,9 @@ func embedOCSPRevocationStatus(cert, issuer *x509.Certificate, i *revocation.Inf
 // embedCRLRevocationStatus requires an issuer as it needs to implement the
 // the interface, a nil argment might be given if the issuer is not known.
 func embedCRLRevocationStatus(cert, issuer *x509.Certificate, i *revocation.InfoArchival) error {
+	if len(cert.CRLDistributionPoints) == 0 {
+		return fmt.Errorf("no CRL distribution points on certificate")
+	}
 	resp, err := RevocationHTTPClient.Get(cert.CRLDistributionPoints[0])
 	if err != nil {
 		return err
@@ -73,8 +87,20 @@ func embedCRLRevocationStatus(cert, issuer *x509.Certificate, i *revocation.Info
 	if err != nil {
 		return err
 	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("CRL fetch failed: %s", resp.Status)
+	}
 
-	// TODO: verify crl and certificate before embedding
+	crl, err := x509.ParseRevocationList(body)
+	if err != nil {
+		return fmt.Errorf("parse CRL: %w", err)
+	}
+	if issuer != nil {
+		if err := crl.CheckSignatureFrom(issuer); err != nil {
+			return fmt.Errorf("CRL signature invalid: %w", err)
+		}
+	}
+
 	return i.AddCRL(body)
 }
 
@@ -157,9 +183,11 @@ func SignLTV(input io.ReadSeeker, output io.Writer, rdr *pdf.Reader, size int64,
 		enc = &EncryptionContext{Key: key, UseAES: rdr.UseAES(), EncVersion: rdr.EncVersion()}
 	}
 	if (len(ocsps) > 0 || len(crls) > 0) && len(certs) > 0 {
-		if augmented, dssErr := AddValidationData(signed, certs, ocsps, crls, enc); dssErr == nil {
-			signed = augmented
+		augmented, dssErr := AddValidationData(signed, certs, ocsps, crls, enc)
+		if dssErr != nil {
+			return nil, fmt.Errorf("add validation data: %w", dssErr)
 		}
+		signed = augmented
 	}
 
 	if _, err := output.Write(signed); err != nil {

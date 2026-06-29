@@ -11,7 +11,9 @@
 [![Coverage Status](https://codecov.io/gh/subnoto/pdfsign/branch/main/graph/badge.svg)](https://codecov.io/gh/)
 [![Go Reference](https://pkg.go.dev/badge/github.com/subnoto/pdfsign.svg)](https://pkg.go.dev/github.com/subnoto/pdfsign)
 
-A PDF signing and verification library written in [Go](https://go.dev). This library provides both command-line tools and Go APIs for digitally signing and verifying PDF documents.
+A PDF signing and verification library written in [Go](https://go.dev). This library provides both command-line tools and Go APIs for digitally signing and verifying PDF documents, including encrypted PDFs, visible signatures, AcroForm field filling, and long-term validation (LTV/LTA).
+
+**Packages:** `sign` (signing), `verify` (verification), `common` (shared types). The `pdfsign` binary wraps both commands.
 
 **See also our [PDFSigner](https://github.com/digitorus/pdfsigner/), a more advanced digital signature server that is using this project.**
 
@@ -145,31 +147,17 @@ package main
 
 import (
     "crypto"
-    "os"
+    "fmt"
     "time"
 
-    "github.com/digitorus/pdf"
     "github.com/subnoto/pdfsign/sign"
 )
 
 func main() {
-    inputFile, err := os.Open("input.pdf")
-    if err != nil {
-        panic(err)
-    }
-    defer inputFile.Close()
-
-    outputFile, err := os.Create("output.pdf")
-    if err != nil {
-        panic(err)
-    }
-    defer outputFile.Close()
-
-    // Load certificate and private key
     certificate := loadCertificate("cert.crt")
     privateKey := loadPrivateKey("key.key")
 
-    err = sign.SignFile("input.pdf", "output.pdf", sign.SignData{
+    signatureInfo, err := sign.SignFile("input.pdf", "output.pdf", sign.SignData{
         Signature: sign.SignDataSignature{
             Info: sign.SignDataSignatureInfo{
                 Name:        "John Doe",
@@ -191,7 +179,62 @@ func main() {
     if err != nil {
         panic(err)
     }
+    fmt.Printf("Document hash: %s\n", signatureInfo.DocumentHash)
 }
+```
+
+`SignFile` and `Sign` return `*common.SignatureInfo` with document/signature hashes, hash algorithm, and optional embedded timestamp metadata.
+
+### Signature types and DocMDP
+
+| Constant | Use case |
+| -------- | -------- |
+| `CertificationSignature` | First (certifying) signature; sets document modification permissions via DocMDP |
+| `ApprovalSignature` | Additional approval signatures; required for visible signature appearances |
+| `UsageRightsSignature` | Usage-rights signature |
+| `TimeStampSignature` | Document timestamp only (no signer certificate) |
+
+When using a certification signature, set `DocMDPPerm` to control post-signing changes:
+
+| Constant | Effect |
+| -------- | ------ |
+| `DoNotAllowAnyChangesPerms` | No further changes allowed |
+| `AllowFillingExistingFormFieldsAndSignaturesPerms` | Form filling and further signatures allowed (default) |
+| `AllowFillingExistingFormFieldsAndSignaturesAndCRUDAnnotationsPerms` | Same as above, plus annotation create/update/delete |
+
+The TSA client supports HTTP basic auth via `TSA.Username` and `TSA.Password`.
+
+### Encrypted PDFs
+
+Encrypted input PDFs are detected automatically. New objects written during signing use the same encryption parameters as the source file, including AcroForm field values and appearance streams filled by `Appearance.SignerUID`.
+
+### Long-term validation (LTV / LTA)
+
+Library-only APIs embed OCSP/CRL revocation data and append a Document Security Store (DSS) for long-term validation:
+
+| Function | Description |
+| -------- | ----------- |
+| `SignLTV` | Signs the PDF, collects revocation responses, and appends a DSS incremental update. Defaults to `BestEffortEmbedRevocationStatusFunction` when `RevocationFunction` is nil (signing succeeds even if responders are unreachable). |
+| `SignLTA` | Same as `SignLTV`, then appends a PAdES-BASELINE-LTA archive document timestamp (`TimeStampSignature`) covering the LT revision. The approval signature step does not embed its own signature timestamp. |
+| `AddValidationData` | Post-process an already-signed PDF byte slice to append DSS data from supplied certificates, OCSP responses, and CRLs. |
+| `DefaultEmbedRevocationStatusFunction` | Fetches and verifies OCSP/CRL; returns an error if embedding fails. |
+| `BestEffortEmbedRevocationStatusFunction` | Same fetch/verify logic but never fails signing. |
+
+Provide `CertificateChains` (at least the signer chain) so revocation data can be associated with the correct certificates. Set `RevocationFunction: sign.DefaultEmbedRevocationStatusFunction` when LTV data must be present for signing to succeed.
+
+```go
+_, err := sign.SignLTV(input, output, rdr, size, sign.SignData{
+    Signature: sign.SignDataSignature{
+        Info:     sign.SignDataSignatureInfo{Name: "Jane Doe", Date: time.Now()},
+        CertType: sign.ApprovalSignature,
+    },
+    Signer:             privateKey,
+    DigestAlgorithm:    crypto.SHA256,
+    Certificate:        certificate,
+    CertificateChains:  [][]*x509.Certificate{{certificate}}, // include intermediates when available
+    RevocationFunction: sign.DefaultEmbedRevocationStatusFunction,
+    TSA:                sign.TSA{URL: "https://freetsa.org/tsr"},
+})
 ```
 
 ### Basic Verification
@@ -230,6 +273,8 @@ func main() {
 package main
 
 import (
+    "encoding/json"
+    "fmt"
     "net/url"
     "os"
     "time"
@@ -322,7 +367,9 @@ func main() {
 
 ## Signature Appearance with Images
 
-Add visible signatures with custom images to your PDF documents.
+Add visible signatures with custom images to PDF documents. **Visible appearances require `CertType: sign.ApprovalSignature`**; certification signatures reject visible appearance settings.
+
+Set `Appearance.Page` (1-based, default `1`) to choose which page receives the annotation.
 
 ### Supported Features
 
@@ -372,9 +419,9 @@ err = sign.Sign(inputFile, outputFile, rdr, size, sign.SignData{
 })
 ```
 
-### Fillable form fields and date format (subnoto fork)
+### Fillable form fields and date format
 
-When the PDF contains AcroForm text fields whose names follow specific patterns, the signer’s **initials** and **signature date** can be filled automatically.
+When the PDF contains AcroForm text fields whose names follow specific patterns, the signer’s **initials** and **signature date** can be filled automatically. Matched fields are set to **read-only** after filling.
 
 - Set **`Appearance.SignerUID`** to a value that identifies the signer (e.g. email). It is matched against the field names; support for both plain and hex-encoded UIDs is available.
 - Field naming patterns:
@@ -441,8 +488,38 @@ Date fields are rendered with a slightly larger font than other filled text fiel
 
 **Recommendation**: Use certificates and PKI infrastructure that support modern hash algorithms (SHA-256 or higher).
 
-## Development Status
+## Building and testing
 
-This library is under active development. The API may change and some PDF files might not work correctly. Bug reports, contributions, and suggestions are welcome.
+Requires **Go 1.25** or later.
 
-For production use, consider our [PDFSigner](https://github.com/digitorus/pdfsigner/) server solution.
+```bash
+go build -v ./...
+go test -race ./...
+```
+
+Lint locally (matches CI):
+
+```bash
+GOTOOLCHAIN=go1.25.0 go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.7.0 run ./...
+```
+
+### Test fixtures
+
+Tests use PDFs under `testfiles/`:
+
+- **`testfile*.pdf`** — assorted real-world and edge-case inputs (multi-page, annotations, encrypted, etc.)
+- **`gen_*.pdf`** — committed fixtures covering PDF versions 1.3–2.0, classic xref tables vs cross-reference streams, AcroForm fields, and nested page trees. Regenerate with ReportLab and pikepdf:
+
+```bash
+./testfiles/generate/generate.sh
+```
+
+See [`testfiles/generate/README.md`](testfiles/generate/README.md) for the full fixture list.
+
+Signed outputs land in `testfiles/success/` during tests. CI validates those PDFs with [pdfcpu](https://github.com/pdfcpu/pdfcpu) (structure and signature integrity).
+
+## Development status
+
+This library is actively maintained in the Subnoto fork. The API may still evolve until changes are merged upstream. Bug reports and contributions are welcome.
+
+For production deployments, consider our [PDFSigner](https://github.com/digitorus/pdfsigner/) server solution.

@@ -105,7 +105,11 @@ func (context *SignContext) createVisualSignature(visible bool, pageNumber uint3
 	// The visual signature object will be the next object added by the caller.
 	// Use getNextObjectID() to predict its ID for string encryption.
 	vsObjID := context.getNextObjectID()
-	visual_signature.WriteString(fmt.Sprintf("  /T %s\n", context.encryptPdfString(vsObjID, "Signature "+strconv.Itoa(len(context.existingSignatures)+1))))
+	titleStr, err := context.encryptPdfString(vsObjID, "Signature "+strconv.Itoa(len(context.existingSignatures)+1))
+	if err != nil {
+		return nil, err
+	}
+	visual_signature.WriteString(fmt.Sprintf("  /T %s\n", titleStr))
 
 	// Reference the signature dictionary.
 	visual_signature.WriteString(fmt.Sprintf("  /V %d 0 R\n", context.SignData.objectId))

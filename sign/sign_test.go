@@ -1711,7 +1711,7 @@ func TestSignVerifyHashConsistency(t *testing.T) {
 
 	// Signature hash comparison - comparing how sign vs verify compute signature hashes
 	if signatureInfo.SignatureHash != verifyInfo.SignatureHash {
-		t.Logf("Signature hash difference (may need further investigation):\n  Sign:   %s\n  Verify: %s",
+		t.Errorf("Signature hash mismatch:\n  Sign:   %s\n  Verify: %s",
 			signatureInfo.SignatureHash, verifyInfo.SignatureHash)
 	} else {
 		t.Logf("✅ Signature hashes match: %s", signatureInfo.SignatureHash)
