@@ -57,14 +57,32 @@ type Appearance struct {
 	// The initials are derived from SignData.Signature.Info.Name.
 	SignerUID string
 
+	// Timezone is an IANA location name (e.g. "Europe/Paris", "America/New_York").
+	// When set, the signature date is converted to this zone before formatting.
+	// Invalid values cause fillDateFields to return an error.
+	Timezone string
 	// DateFormat is the Go time layout for the date+time part of filled date fields
 	// (reference time: Mon Jan 2 15:04:05 MST 2006). When non-empty, used for date_id_* fields;
-	// timezone is still appended. When empty, Locale is used if set, else default US layout.
+	// timezone is still appended. When empty, DateStyle and Locale are used.
 	DateFormat string
-	// Locale is a BCP 47-style tag (e.g. "en-US", "fr-FR", "de-DE"). Used only when DateFormat
-	// is empty to pick a predefined date layout so the filled date respects the locale format.
+	// DateStyle selects a preset format when DateFormat is empty.
+	// Supported: DateStyleNumeric (default), DateStyleDateOnly, DateStyleLong, DateStyleHuman.
+	DateStyle string
+	// DateOmitTime, when true, causes long and human styles to omit the time portion
+	// (e.g. "15 janvier 2024" instead of "15 janvier 2024 à 14:30"). Has no effect on
+	// numeric or date-only styles.
+	DateOmitTime bool
+	// Locale is a BCP 47-style tag (e.g. "en-US", "fr-FR", "de-DE"). Used when DateFormat
+	// is empty to pick locale-specific layouts and localized month names for long/human styles.
 	Locale string
 }
+
+const (
+	DateStyleNumeric  = "numeric"
+	DateStyleDateOnly = "date-only"
+	DateStyleLong     = "long"
+	DateStyleHuman    = "human"
+)
 
 type VisualSignData struct {
 	pageObjectId uint32

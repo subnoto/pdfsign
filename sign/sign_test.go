@@ -409,12 +409,102 @@ func TestSignPDFInitials(t *testing.T) {
 	}
 }
 
+func filledDateFieldValueForUID(pdfPath string, uid string) (string, bool, error) {
+	sf, err := os.Open(pdfPath)
+	if err != nil {
+		return "", false, err
+	}
+	defer sf.Close()
+
+	sfi, err := sf.Stat()
+	if err != nil {
+		return "", false, err
+	}
+
+	rdr, err := pdf.NewReader(sf, sfi.Size())
+	if err != nil {
+		return "", false, err
+	}
+
+	fields := rdr.Trailer().Key("Root").Key("AcroForm").Key("Fields")
+	if fields.IsNull() {
+		return "", false, fmt.Errorf("signed PDF AcroForm missing Fields")
+	}
+
+	uidVariants := []string{uid, fmt.Sprintf("%x", uid)}
+
+	for i := 0; i < fields.Len(); i++ {
+		field := fields.Index(i)
+		tVal := field.Key("T")
+		if tVal.IsNull() {
+			continue
+		}
+		fieldName := tVal.RawString()
+		decodedFieldName := fieldName
+		b := []byte(fieldName)
+		if len(b) >= 2 {
+			if b[0] == 0xfe && b[1] == 0xff {
+				var u16s []uint16
+				for j := 2; j+1 < len(b); j += 2 {
+					u16s = append(u16s, uint16(b[j])<<8|uint16(b[j+1]))
+				}
+				decodedFieldName = string(utf16.Decode(u16s))
+			} else if b[0] == 0xff && b[1] == 0xfe {
+				var u16s []uint16
+				for j := 2; j+1 < len(b); j += 2 {
+					u16s = append(u16s, uint16(b[j])|uint16(b[j+1])<<8)
+				}
+				decodedFieldName = string(utf16.Decode(u16s))
+			}
+		}
+		if !strings.Contains(decodedFieldName, "date_id_") {
+			continue
+		}
+		uidMatches := false
+		for _, uidVariant := range uidVariants {
+			if strings.Contains(decodedFieldName, uidVariant) {
+				uidMatches = true
+				break
+			}
+		}
+		if !uidMatches {
+			continue
+		}
+
+		vVal := field.Key("V")
+		if vVal.IsNull() {
+			continue
+		}
+		raw := strings.Trim(vVal.RawString(), "()")
+
+		kids := field.Key("Kids")
+		if !kids.IsNull() {
+			for k := 0; k < kids.Len(); k++ {
+				kid := kids.Index(k)
+				kidV := kid.Key("V")
+				if !kidV.IsNull() {
+					kidRaw := strings.Trim(kidV.RawString(), "()")
+					if kidRaw != "" {
+						raw = kidRaw
+						break
+					}
+				}
+			}
+		}
+		if raw != "" {
+			return raw, true, nil
+		}
+	}
+
+	return "", false, nil
+}
+
 func TestSignPDFDates(t *testing.T) {
 	cert, pkey := loadCertificateAndKey(t)
 
 	// Use a specific date for testing to ensure consistent results
 	testDate := time.Date(2024, 1, 15, 14, 30, 0, 0, time.FixedZone("EST", -5*3600)) // Jan 15, 2024 14:30 EST
-	expectedDateStr := "01/15/2024 14:30 -05:00"
+	expectedDateStr := "01/15/2024 14:30 EST"
 
 	// Test with testfile60.pdf - uses toto@toto.com
 	tests := []struct {
@@ -574,7 +664,7 @@ func TestSignPDFDates(t *testing.T) {
 				}
 
 				// Check if the date string is present in the field value
-				if strings.Contains(raw, "01/15/2024") && strings.Contains(raw, "14:30") {
+				if strings.Contains(raw, "01/15/2024") && strings.Contains(raw, "14:30") && strings.Contains(raw, "EST") {
 					found = true
 					break
 				}
@@ -694,6 +784,99 @@ func TestSignPDFDates(t *testing.T) {
 			}
 		}
 		t.Fatalf("Date field with UTC timezone not found: expected value to contain 01/15/2024, 14:30 and UTC")
+	})
+
+	t.Run("timezone_america_new_york", func(t *testing.T) {
+		if _, err := os.Stat(inputFilePath); os.IsNotExist(err) {
+			t.Skipf("test file %s not available: %v", inputFilePath, err)
+			return
+		}
+		tmpfile, err := os.CreateTemp("", "sign_dates_ny_")
+		if err != nil {
+			t.Fatalf("failed to create tmpfile: %v", err)
+		}
+		defer func() { _ = os.Remove(tmpfile.Name()) }()
+
+		utcDate := time.Date(2024, 1, 15, 14, 30, 0, 0, time.UTC)
+		_, err = SignFile(inputFilePath, tmpfile.Name(), SignData{
+			Signature: SignDataSignature{
+				Info: SignDataSignatureInfo{
+					Name: "Test Signer",
+					Date: utcDate,
+				},
+				CertType:   CertificationSignature,
+				DocMDPPerm: AllowFillingExistingFormFieldsAndSignaturesPerms,
+			},
+			Signer:      pkey,
+			Certificate: cert,
+			Appearance: Appearance{
+				SignerUID: "toto@toto.com",
+				Timezone:  "America/New_York",
+				Locale:    "en-US",
+				DateStyle: DateStyleNumeric,
+			},
+		})
+		if err != nil {
+			t.Fatalf("sign failed: %v", err)
+		}
+
+		raw, found, err := filledDateFieldValueForUID(tmpfile.Name(), "toto@toto.com")
+		if err != nil {
+			t.Fatalf("failed to read date field: %v", err)
+		}
+		if !found {
+			t.Fatal("date field not found")
+		}
+		if !strings.Contains(raw, "01/15/2024") || !strings.Contains(raw, "09:30") || !strings.Contains(raw, "EST") {
+			t.Fatalf("unexpected date field value %q, want 01/15/2024 09:30 EST", raw)
+		}
+	})
+
+	t.Run("human_fr_date_only", func(t *testing.T) {
+		if _, err := os.Stat(inputFilePath); os.IsNotExist(err) {
+			t.Skipf("test file %s not available: %v", inputFilePath, err)
+			return
+		}
+		tmpfile, err := os.CreateTemp("", "sign_dates_fr_human_")
+		if err != nil {
+			t.Fatalf("failed to create tmpfile: %v", err)
+		}
+		defer func() { _ = os.Remove(tmpfile.Name()) }()
+
+		utcDate := time.Date(2024, 1, 15, 14, 30, 0, 0, time.UTC)
+		_, err = SignFile(inputFilePath, tmpfile.Name(), SignData{
+			Signature: SignDataSignature{
+				Info: SignDataSignatureInfo{
+					Name: "Test Signer",
+					Date: utcDate,
+				},
+				CertType:   CertificationSignature,
+				DocMDPPerm: AllowFillingExistingFormFieldsAndSignaturesPerms,
+			},
+			Signer:      pkey,
+			Certificate: cert,
+			Appearance: Appearance{
+				SignerUID:    "toto@toto.com",
+				Timezone:     "Europe/Paris",
+				Locale:       "fr-FR",
+				DateStyle:    DateStyleHuman,
+				DateOmitTime: true,
+			},
+		})
+		if err != nil {
+			t.Fatalf("sign failed: %v", err)
+		}
+
+		raw, found, err := filledDateFieldValueForUID(tmpfile.Name(), "toto@toto.com")
+		if err != nil {
+			t.Fatalf("failed to read date field: %v", err)
+		}
+		if !found {
+			t.Fatal("date field not found")
+		}
+		if !strings.Contains(raw, "15 janvier 2024") || strings.Contains(raw, "à") || strings.Contains(raw, "15:30") {
+			t.Fatalf("unexpected date field value %q, want human French date without time", raw)
+		}
 	})
 }
 
