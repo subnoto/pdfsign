@@ -146,8 +146,10 @@ source_baseline_skip() {
 
 signed_to_source_filename() {
   # testfile12_TestSignPDF.pdf -> testfile12.pdf
+  # testfile12_TestSignPDFVisibleAll.pdf -> testfile12.pdf
   # gen_pdf14_acroform_TestSignLTV.pdf -> gen_pdf14_acroform.pdf
-  echo "$1" | sed -E 's/_TestSign[^.]+\.pdf/.pdf/'
+  # testfile20_TestSignLTA.pdf -> testfile20.pdf
+  echo "$1" | sed -E 's/_(TestSignPDF|TestSignPDFVisibleAll|TestSignLTV|TestSignLTA)\.pdf$/.pdf/'
 }
 
 should_skip_pdf() {

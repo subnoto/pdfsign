@@ -14,6 +14,11 @@ import (
 
 func baseLTVSignData(t *testing.T) SignData {
 	t.Helper()
+	tsaServer := newMockTSAServer(t)
+	t.Cleanup(tsaServer.Close)
+	origTSA := TimestampHTTPClient
+	TimestampHTTPClient = tsaServer.Client()
+	t.Cleanup(func() { TimestampHTTPClient = origTSA })
 	cert, key := loadCertificateAndKey(t)
 	return SignData{
 		Signature: SignDataSignature{
@@ -30,7 +35,7 @@ func baseLTVSignData(t *testing.T) SignData {
 		Certificate:        cert,
 		CertificateChains:  [][]*x509.Certificate{{cert}},
 		RevocationFunction: mockRevocationFunction,
-		TSA:                TSA{URL: BelgianFederalTSAURL},
+		TSA:                TSA{URL: tsaServer.URL},
 	}
 }
 
