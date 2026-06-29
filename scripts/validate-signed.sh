@@ -195,7 +195,15 @@ validate_pdfsign() {
 
 validate_dss() {
   local signed_file="$1"
-  python3 "$ROOT/scripts/dss_validate.py" --url "$DSS_URL" "$signed_file"
+  local profile="auto"
+  local base
+  base=$(basename "$signed_file")
+  if [[ "$base" == *"_TestSignLTA"* ]]; then
+    profile="lta"
+  elif [[ "$base" == *"_TestSignLTV"* ]]; then
+    profile="ltv"
+  fi
+  python3 "$ROOT/scripts/dss_validate.py" --url "$DSS_URL" --profile "$profile" "$signed_file"
 }
 
 # --- parse args ---

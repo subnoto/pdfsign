@@ -11,9 +11,12 @@ and cryptographic integrity instead:
   - DigestMatcher DataIntact
   - PDF SignatureByteRange.valid
 
+LTV/LTA fixtures (*_TestSignLTV.pdf, *_TestSignLTA.pdf) additionally require
+ISO 32000 markers in the PDF bytes (/Type /DSS, /VRI, and for LTA /DocTimeStamp).
+
 Usage:
   DSS_URL=http://localhost:8080 ./scripts/dss_validate.py file.pdf ...
-  ./scripts/dss_validate.py --url https://example/dss services/rest/validation file.pdf
+  ./scripts/dss_validate.py --expect-ltv file.pdf
 """
 
 from __future__ import annotations
@@ -34,10 +37,39 @@ def dss_base_url(raw: str) -> str:
     return raw + "/services/rest/validation"
 
 
-def validate_pdf(path: Path, url: str, timeout: float) -> tuple[bool, str]:
+def pdf_markers(data: bytes, markers: list[str]) -> list[str]:
+    text = data.decode("latin-1", errors="ignore")
+    return [m for m in markers if m not in text]
+
+
+def infer_profile(path: Path) -> str:
+    name = path.name
+    if "_TestSignLTA" in name:
+        return "lta"
+    if "_TestSignLTV" in name:
+        return "ltv"
+    return "baseline"
+
+
+def validate_pdf(
+    path: Path,
+    url: str,
+    timeout: float,
+    profile: str,
+) -> tuple[bool, str]:
+    data = path.read_bytes()
+    if profile in ("ltv", "lta"):
+        ltv_missing = pdf_markers(data, ["/Type /DSS", "/VRI"])
+        if ltv_missing:
+            return False, f"LTV markers missing: {ltv_missing}"
+    if profile == "lta":
+        lta_missing = pdf_markers(data, ["/Type /DocTimeStamp", "/SubFilter /ETSI.RFC3161"])
+        if lta_missing:
+            return False, f"LTA markers missing: {lta_missing}"
+
     payload = {
         "signedDocument": {
-            "bytes": base64.b64encode(path.read_bytes()).decode(),
+            "bytes": base64.b64encode(data).decode(),
             "name": path.name,
         },
         "tokenExtractionStrategy": "NONE",
@@ -96,7 +128,8 @@ def validate_pdf(path: Path, url: str, timeout: float) -> tuple[bool, str]:
 
     fmt = sigs[0].get("SignatureFormat", "?")
     sub = (sigs[0].get("PDFRevision") or {}).get("PDFSignatureDictionary", {}).get("SubFilter", "?")
-    return True, f"ok ({len(sigs)} signature(s), format={fmt}, subFilter={sub})"
+    profile_label = {"baseline": "B-B/B-T", "ltv": "B-LT", "lta": "B-LTA"}.get(profile, profile)
+    return True, f"ok ({len(sigs)} signature(s), profile={profile_label}, format={fmt}, subFilter={sub})"
 
 
 def main() -> int:
@@ -106,6 +139,12 @@ def main() -> int:
         "--url",
         default=None,
         help="DSS base URL (default: $DSS_URL or http://localhost:8080)",
+    )
+    parser.add_argument(
+        "--profile",
+        choices=("baseline", "ltv", "lta", "auto"),
+        default="auto",
+        help="Expected PAdES profile (default: infer from filename)",
     )
     parser.add_argument("--timeout", type=float, default=120.0, help="HTTP timeout seconds")
     args = parser.parse_args()
@@ -125,7 +164,8 @@ def main() -> int:
             print(f"❌ {pdf}: empty file", file=sys.stderr)
             failed += 1
             continue
-        ok, msg = validate_pdf(pdf, url, args.timeout)
+        profile = infer_profile(pdf) if args.profile == "auto" else args.profile
+        ok, msg = validate_pdf(pdf, url, args.timeout, profile)
         if ok:
             print(f"✅ DSS {pdf.name}: {msg}")
         else:

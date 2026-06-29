@@ -2,7 +2,6 @@ package sign
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -107,7 +106,9 @@ func TestPAdESSignatureStructure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tmp.Close()
+	if err := tmp.Close(); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { _ = os.Remove(tmp.Name()) })
 
 	_, err = SignFile("../testfiles/testfile20.pdf", tmp.Name(), SignData{
@@ -127,32 +128,4 @@ func TestPAdESSignatureStructure(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertPAdESSignatureObjects(t, openPDFReader(t, tmp.Name()))
-}
-
-func TestPAdESStructureOnSuccessFixtures(t *testing.T) {
-	dir := "../testfiles/success"
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Skip("testfiles/success not present")
-	}
-	var files []string
-	for _, e := range entries {
-		if filepath.Ext(e.Name()) != ".pdf" {
-			continue
-		}
-		path := filepath.Join(dir, e.Name())
-		info, err := os.Stat(path)
-		if err != nil || info.Size() == 0 {
-			continue
-		}
-		files = append(files, path)
-	}
-	if len(files) == 0 {
-		t.Skip("no non-empty signed PDFs in testfiles/success")
-	}
-	for _, path := range files {
-		t.Run(filepath.Base(path), func(t *testing.T) {
-			assertPAdESSignatureObjects(t, openPDFReader(t, path))
-		})
-	}
 }

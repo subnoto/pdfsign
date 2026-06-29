@@ -8,12 +8,13 @@ Three layers validate outputs under `testfiles/success/` (created by `go test -v
 | Cryptographic verification | `pdfsign verify` / `verify` package | RFC 5652 (CMS), RFC 3161 (timestamps), RFC 9336 (cert profile) |
 | PAdES structure + crypto (Go tests) | `sign/conformance_test.go` | ISO 32000 signature dictionaries, PAdES CMS detached profile |
 | PAdES validation (optional) | [EU DSS](https://github.com/esig/dss) via REST | ETSI EN 319 142 (via DSS validator) |
+| LTV / LTA fixtures | `TestSignLTVFixtures`, `TestSignLTAFixtures` | PAdES B-LT / B-LTA (`/DSS`, `/VRI`, `/DocTimeStamp`) |
 
 ## Quick start
 
 ```bash
-# 1. Generate signed fixtures
-go test -v ./sign/...
+# 1. Generate signed fixtures (standard + LTV/LTA; LTV/LTA need network for Belgian TSA)
+go test -v ./sign/ -run 'TestSignPDF|TestSignPDFVisibleAll|TestSignLTV|TestSignLTA'
 
 # 2. pdfcpu + pdfsign verify
 ./scripts/validate-signed.sh
@@ -47,6 +48,16 @@ Calls `POST …/services/rest/validation/validateSignature`. For test certificat
 (chain untrusted), pass criteria are **structural and cryptographic integrity**
 (`SignatureValid`, `SignatureIntact`, `SignatureByteRange.valid`), not EU trust-list
 qualification.
+
+Profiles are inferred from filenames:
+
+| Pattern | Profile | Extra PDF checks |
+| ------- | ------- | ---------------- |
+| `*_TestSignPDF*.pdf` | B-B / B-T | — |
+| `*_TestSignLTV.pdf` | B-LT | `/Type /DSS`, `/VRI` |
+| `*_TestSignLTA.pdf` | B-LTA | above + `/Type /DocTimeStamp` |
+
+LTV/LTA fixtures use the **Belgian Federal TSA** (`http://tsa.belgium.be/connect`, Belgian Root CA6).
 
 ## Manual ETSI conformance checker
 
