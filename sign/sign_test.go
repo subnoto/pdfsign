@@ -414,7 +414,7 @@ func filledDateFieldValueForUID(pdfPath string, uid string) (string, bool, error
 	if err != nil {
 		return "", false, err
 	}
-	defer sf.Close()
+	defer func() { _ = sf.Close() }()
 
 	sfi, err := sf.Stat()
 	if err != nil {
